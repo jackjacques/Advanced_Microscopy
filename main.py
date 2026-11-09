@@ -347,3 +347,82 @@ if __name__ == "__main__":
     plt.show()
     
     sample.contrastModes(NA=0.5)
+
+    # ================= PART 4 : Échantillonnage du détecteur et bruit (Q6) =================
+
+    def addCameraEffects(self, image, pixel_pitch, snr, magnification=1.0, seed=None):
+        """Q6 - Simule une caméra : (1) intégration de la lumière par pixel,
+        (2) bruit de photons (Poisson).
+
+        pixel_pitch   : pas du pixel de la caméra [m]
+        snr           : SNR au pic de l'image (nombre de photons au pic = snr^2)
+        magnification : grossissement M. Dans le plan objet, un pixel
+                        correspond à pixel_pitch / M.
+        """
+        # 1. Rééchantillonnage : taille du pixel ramenée dans le plan objet
+        pitch_obj = pixel_pitch / magnification
+        if pitch_obj < self.dx:
+            print(f"Attention : pixel objet ({pitch_obj*1e6:.2f} µm) < dx de la "
+                  f"grille ({self.dx*1e6:.2f} µm) : sur-échantillonnage, "
+                  f"pas d'information en plus. Augmente N.")
+        n_pix = int(round(self.L / pitch_obj))
+        # INTER_AREA = moyenne sur la surface couverte par chaque pixel,
+        # ce qui reproduit l'intégration de la lumière par un vrai pixel
+        resampled = cv2.resize(image.astype(np.float64), (n_pix, n_pix),
+                               interpolation=cv2.INTER_AREA)
+        resampled = np.clip(resampled, 0, None)
+
+        # 2. Bruit de Poisson : SNR = sqrt(N)  =>  N_pic = SNR^2 photons
+        peak_photons = snr**2
+        scaled = resampled / max(resampled.max(), 1e-12) * peak_photons
+        rng = np.random.default_rng(seed)
+        noisy = rng.poisson(scaled)
+
+        # 3. Retour à une échelle relative (pic ~ 1) pour l'affichage
+        return noisy / peak_photons
+
+    def cameraComparison(self, NA=0.5, cameras=((1e-6, 30), (3.5e-6, 60)),
+                         magnification=1.0, half_window_um=30):
+        """Q6 - Même objet, deux caméras : (pixel 1 µm, SNR 30) vs (pixel 3.5 µm, SNR 60).
+        Ligne du haut : champ complet. Ligne du bas : zoom sur un noyau."""
+        ideal = self.applyPupilImaging(NA)
+        ideal = ideal / ideal.max()
+
+        images = [ideal]
+        titles = [f"Image idéale\n(dx = {self.dx*1e6:.2f} µm, sans bruit)"]
+
+        nyquist_um = self.lambda_ref / (4 * NA) * 1e6
+        nuc_diam_um = 2 * self.nucleus_radius_frac * self.cell_radius_mean * 1e6
+        print(f"=== CAMÉRAS (NA = {NA}, M = {magnification}) ===")
+        print(f"Nyquist pour la NA : pixel objet <= lambda/(4NA) = {nyquist_um:.2f} µm")
+        for pitch, snr in cameras:
+            p_obj = pitch / magnification * 1e6
+            print(f"Pixel {pitch*1e6:.1f} µm, SNR {snr} : pixel objet = {p_obj:.2f} µm, "
+                  f"{snr**2} photons au pic, noyau ~ {nuc_diam_um/p_obj:.1f} pixels de large")
+            images.append(self.addCameraEffects(ideal, pitch, snr, magnification, seed=0))
+            titles.append(f"Pixel {pitch*1e6:.1f} µm, SNR = {snr}")
+
+        fov_um = self.L * 1e6
+        extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
+
+        # Zoom centré sur un noyau (premier pixel de transmission minimale)
+        iy, ix = np.unravel_index(np.argmin(self.intensity_map), self.intensity_map.shape)
+        xc, yc = self.X[iy, ix] * 1e6, self.Y[iy, ix] * 1e6
+
+        fig, axes = plt.subplots(2, len(images), figsize=(5 * len(images), 9),
+                                 constrained_layout=True)
+        for col, (img, title) in enumerate(zip(images, titles)):
+            for row in range(2):
+                ax = axes[row, col]
+                ax.imshow(img, cmap="gray", extent=extent, origin="lower",
+                          interpolation="nearest", vmin=0.3, vmax=1.1)
+                ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
+                if row == 0:
+                    ax.set_title(title)
+                else:
+                    ax.set_xlim(xc - half_window_um, xc + half_window_um)
+                    ax.set_ylim(yc - half_window_um, yc + half_window_um)
+        plt.savefig("part4_camera.png", dpi=150)
+        plt.show()
+
+
