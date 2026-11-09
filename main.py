@@ -388,7 +388,7 @@ class Microscopy:
                 else:
                     ax.set_xlim(xc - half_window_um, xc + half_window_um)
                     ax.set_ylim(yc - half_window_um, yc + half_window_um)
-        plt.savefig("figures/part4_camera.png", dpi=150)
+        plt.savefig("part4_camera.png", dpi=150)
         plt.show()
 
     def fresnelPropagate(self, field, dz, wavelength=None):
@@ -397,12 +397,37 @@ class Microscopy:
         f = np.fft.fftfreq(self.N, d=self.dx)
         FX, FY = np.meshgrid(f, f)
 
-        arg = 1.0 - (wl * FX) ** 2 - (wl * FY) ** 2
+        arg = 1.0 - (wl * FX) * 2 - (wl * FY) * 2
         propagating = arg > 0                       # ondes évanescentes (arg < 0) : supprimées
         kz = 2 * np.pi / wl * np.sqrt(np.maximum(arg, 0.0))
         H = np.exp(1j * kz * dz) * propagating
 
         return np.fft.ifft2(np.fft.fft2(field) * H)
+
+    def simulate_two_layer(self, dz, NA):
+        """
+        Simule un objet à deux couches séparées par dz et passe le tout 
+        à travers le système d'imagerie du microscope (pupille et NA).
+        """
+        # 1. Champ de la couche 1 (dans le plan focal z = 0)
+        E1 = self.get_complex_field()
+        
+        # 2. Génération d'une deuxième couche (deuxième objet indépendant) 
+        # et propagation de Fresnel sur la distance dz
+        phase2, intensity2 = self.makeObject() # Adaptez selon votre méthode de création d'objet
+        E2_initial = np.sqrt(intensity2) * np.exp(1j * phase2)
+        E2_propagated = self.fresnelPropagate(E2_initial, dz=dz)
+        
+        # 3. Superposition des deux champs au niveau de l'objet
+        E_total = E1 + E2_propagated
+        
+        # 4. Passage à travers le système optique du microscope (Pupille / NA)
+        pupil = self.computePupil(NA=NA, lambda_ref=self.lambda_ref, L=self.L, N=self.N)
+        image_two_layers = self.imageWithPupil(pupil, field=E_total)
+        
+        return image_two_layers
+    
+
     
 
     
@@ -455,10 +480,23 @@ if __name__ == "__main__":
     pupil = sample.computePupil(NA=0.5, lambda_ref=sample.lambda_ref, L=sample.L, N=sample.N)
     image_defocused = sample.imageWithPupil(pupil, field=field_defocused)
 
+    image_two_layers = sample.simulate_two_layer(dz=dz, NA=0.5)
+    print("Image générée avec succès, dimensions :", image_two_layers.shape)
+
     # Affichage de l'image défocalisée
     plt.figure(figsize=(6, 5), constrained_layout=True)
     plt.imshow(image_defocused, cmap="gray", extent=extent, origin="lower")
     plt.title(f"Image défocalisée (dz = {dz*1e6:.0f} µm, NA = 0.5)")
+    plt.xlabel(r"$x\ (\mu\mathrm{m})$")
+    plt.ylabel(r"$y\ (\mu\mathrm{m})$")
+    plt.colorbar(label="Intensité")
+    plt.show()   
+
+    # Affichage de l'objet à deux couches
+    # affichage
+    plt.figure(figsize=(6, 5), constrained_layout=True)
+    plt.imshow(image_two_layers, cmap="gray", extent=extent, origin="lower")
+    plt.title(f"Objet à deux couches séparées de {dz*1e6:.0f} µm (NA = 0.5)")
     plt.xlabel(r"$x\ (\mu\mathrm{m})$")
     plt.ylabel(r"$y\ (\mu\mathrm{m})$")
     plt.colorbar(label="Intensité")
