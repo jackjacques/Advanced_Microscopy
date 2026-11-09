@@ -388,7 +388,7 @@ class Microscopy:
                 else:
                     ax.set_xlim(xc - half_window_um, xc + half_window_um)
                     ax.set_ylim(yc - half_window_um, yc + half_window_um)
-        plt.savefig("part4_camera.png", dpi=150)
+        plt.savefig("figures/part4_camera.png", dpi=150)
         plt.show()
 
     def fresnelPropagate(self, field, dz, wavelength=None):
