@@ -1,5 +1,6 @@
 \documentclass[12pt]{article}
 
+\usepackage{float}
 \usepackage{amsmath}
 \usepackage{graphicx}
 
@@ -12,43 +13,136 @@
 \begin{document}
 
 \maketitle
-\section{Defining the Object}
-\paragraph{Q1.1} What would the image of such an object look like on a traditional widefield
-microscope? What is the minimum numerical aperture that should allow you to resolve the
-nuclei?
 
-The image object is on an actial widefild microscope, a bunch of cells that have a certain thikness and so absorb a certain amount of light.
-The image is then genuinely a absorbtion spectrum, depending of the phase.
-If $\Delta z = 0$ (focus):
-A standard camera or the human eye detects only optical intensity $I = \vert{}E\vert{}^2 = 1$. The phase perturbations do not generate amplitude contrast when the object plane is conjugate to the detector.
+\section{Part 1 - Defining the Object}
+\subsection{Q1}
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width= 0.8\textwidth]{figures/part1_Intensity_and_Phase_maps.png}
+  \caption{Synthetic object maps showing the transmitted intensity $I(x, y)$ and the accumulated phase delay $\Delta\phi(x, y)$ across a $1.2\text{ mm} \times 1.2\text{ mm}$ field of view.}
+  \label{fig:part1_object}
+\end{figure}
 
-Out of contrast : $\Delta z \neq 0$
-Cell boundaries and the refractive index gradient between the nucleus and the cytoplasm become visible as bright and dark diffraction fringes (haloes) around the edges.
+
+\paragraph{Q1.1} \textit{What would the image of such an object look like on a traditional widefield microscope? What is the minimum numerical aperture that should allow you to resolve the nuclei?}
+
+The image object is on an actual widefild microscope, a bunch of cells that have a certain thikness and absorb a certain amount of light.
+The image is then genuinely a phase object:
+\begin{itemize}
+  \item $\Delta z = 0$ (focus):
+  A camera or the eye detects only optical intensity $I = \vert{}E\vert{}^2 = 1$. The phase perturbations do not generate amplitude contrast when the object plane is conjugate to the lense (detector).
+  \item $\Delta z \neq 0$ (out of contrast):
+  As a transparent cell does not absorb light, but has a index of refraction that is a little bit higher than the fluid around, it acts as a small convergent lense, with a gradient index. So when the detector moves of $\Delta z$, the phase changes for the electromagnetic wave, and the focus is lost.
+\end{itemize}
+
 
 For the numerical apperture:
 $$R_{\text{nuc}} = 50\,\mu\text{m} \times 0.10 = 5\,\mu\text{m}$$
 $$\Leftrightarrow$$
 $$D_{\text{nuc}} = 2 \times R_{\text{nuc}} = 10\,\mu\text{m}$$
-So, we need to compute the diffraction limits.
-To resolve the object of diameter $D_{nuc}$, we must use two differents metrics:
+$$\lambda=550 \mu m$$
+We need to compute the diffraction limits.
+To resolve the object of a diameter of $D_{nuc}$, we must use two differents metrics:
 \begin {itemize}
     \item Abbe Resolution Limit:$$d_{\text{min}} = \frac{\lambda}{2 \cdot NA} \le D_{\text{nuc}} \implies NA \ge \frac{\lambda}{2 D_{\text{nuc}}}$$ $$\Leftrightarrow$$ $$NA \ge \frac{0.55\,\mu\text{m}}{2 \times 10\,\mu\text{m}} = \mathbf{0.0275}$$
     \item Rayleigh Criterion:$$r_{\text{Rayleigh}} = 0.61 \frac{\lambda}{NA} \le D_{\text{nuc}} \implies NA \ge 0.61 \frac{\lambda}{D_{\text{nuc}}}$$ $$\Leftrightarrow$$ $$NA \ge 0.61 \times \frac{0.55\,\mu\text{m}}{10\,\mu\text{m}} \approx \mathbf{0.034}$$
 \end{itemize}
 So, the absolute theoretical lower bound to resolve the nucleus as an individual feature is $NA \approx 0.034$.
 
-\paragraph{Q1.2} What kind of technique could be used to retrieve information from a sample that is
-mostly transparent?
+\paragraph{Q1.2} \textit{What kind of technique could be used to retrieve information from a sample that is mostly transparent?}
+
+There is two electromagnetic waves that goes through the sample: 
+\begin{itemize}
+  \item the direct one, that is not diffracted and has no phase lag;
+  \item The one that goes across the cell and is diffracted by the nucleus ot the borders of the cell.
+\end{itemize}
+Thoses waves are in phase opposition. 
+So a solution could be to set a darkfield: as dust particules lighten by the sun rays in a dark room, we can see very small dust particules that we would never without the darkfield.
+They are only visible because the diffraction of the light.
+This parallel is true in microscopy:
+\begin{itemize}
+  \item We select only a cone of inclined light.
+  \item We assert $NA_{illum} > NA_{obj}$: the angle of the light beam is superior to the objective aperture angle.
+  \item When the light crosses a cell, the borders and organs diffract the light in evry directions.
+\end{itemize}
+Result: the background is dark, the cytoplasma is dark too (does not deflect light beams) but only the border is grey.
+
+\section{Part 2 - Resolution and the Pupil Function}
+
+\paragraph{Q3} \textit{Using fft2, fftshift, ifft2, simulate imaging of the object for NA = 0.01, 0.1, 1.0.
+Compare the resulting images. Are the cells resolved? The nuclei?}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{figures/part2_pupil_and_cutoffs.png}
+  \caption{Pupil masks $P(f_x, f_y)$ and central 1D cross-sections for $NA \in \{0.01, 0.1, 1.0\}$, illustrating the spatial frequency cutoffs $f_c$ acting as low-pass filters.}
+  \label{fig:part2_pupil}
+\end{figure}
+
+The coherent imaging process through a $4f$ optical telecentric system is simulated by convolving the complex field $E_{\text{in}} = \sqrt{I} e^{i\phi}$ with the objective Point Spread Function (PSF), implemented via the 2D Fourier transform:
+\[
+E_{\text{out}}(x, y) = \mathcal{F}^{-1} \left\{ \mathcal{F}\{E_{\text{in}}\}(f_x, f_y) \cdot P(f_x, f_y) \right\}, \quad I_{\text{det}} = |E_{\text{out}}|^2
+\]
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{figures/part2_Q33_resolution_computation.png}
+  \caption{Simulated coherent imaging of the synthetic cell sample across three numerical apertures ($NA \in \{0.01, 0.1, 1.0\}$).}
+  \label{fig:part2_cells_na}
+\end{figure}
+
+Comparing the three numerical apertures:
+\begin{itemize}
+    \item \textbf{$NA = 0.01$ ($r_{\text{Rayleigh}} = 33.6\,\mu\text{m}$):} Cutoff frequency ($f_c = 18.2\text{ mm}^{-1}$): restrictive. $r_{\text{Rayleigh}} \gg D_{\text{nuc}}$, so the nucleus vanishes into blurry dark stain. Cells overlap creates huges diffraction rings with no distinct boundaries.
+    \item \textbf{$NA = 0.10$ ($r_{\text{Rayleigh}} = 3.35\,\mu\text{m}$):} Since $r_{\text{Rayleigh}} < D_{\text{nuc}} = 10\,\mu\text{m}$, Rayleigh criteria are satisfied, and nuclei are distinctly resolved and cellular boundaries are clearly separable.
+    \item \textbf{$NA = 1.00$ ($r_{\text{Rayleigh}} = 0.34\,\mu\text{m}$):} Diffraction-limited resolution is achieved. Cutoff exceeds main spatial frequencies of the sample ($f_c = 1818\text{ mm}^{-1}$), reproducing cell contours and nuclear geometries with nearly perfect accuracy.
+\end{itemize}
+
+\paragraph{Q3.1} \textit{Where is the pupil of the objective physically located?}
+
+The back focal plane is behind the lense (objective). Though, as all the rays comes from the infinity, all parallal rays emmited by the sample ver a certain angle $\theta$ converges to a special point on this back focal plan (BFP). It is a physical apperture that truncate the angles accepted and foxes the maximal apperture angle:  $\theta_{\max} = \arcsin(NA / n)$.
+
+\paragraph{Q3.2} \textit{Intuitively, how come the process of imaging through an optical system involves
+Fourier transforms?}
+
+The light that goes through an object decomposes into a sum of plane waves. The angle of deflection then directly depends on the fine details. Indeed, the object's spatial frequencies are given by: $\sin\theta = \lambda f_x$. The lense focuses each wave $\Sigma_\theta$ into a single point $x_f, y_f$, in the BFP. This plane thus physically realizes a 2D spatial Fourier transform of the incident wave field. 
+The second lens then collects these focal points and refocuses them onto the image plane, which performs the inverse operation (inverse Fourier transform-ifft/ifft2) of the recombined plane waves.
+
+\paragraph{Q3.3} \textit{A target can be used to quantify the resolution of a microscope. Use the different
+targets provided to try and assess the resolution of your system. Explain the method you
+are are using as well as your results.}
+
+To calibrate optical resolution experimentally, a standard negative USAF 1951 resolution target is imaged through the pipeline for each numerical aperture:
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{figures/part2_Resolution_calibration_USAF1951.png}
+  \caption{Simulation of the USAF 1951 resolution target across $NA \in \{0.01, 0.1, 1.0\}$, comparing global field views, central zoomed regions, and Michelson contrast modulation.}
+  \label{fig:part2_usaf}
+\end{figure}
+
+\textbf{Methodology:}
+\begin{enumerate}
+    \item The target image is rescaled to physical coordinates ($L = 1.2\text{ mm}$, $N = 1024$), transformed to frequency space via \texttt{fft2}, filtered with the binary pupil mask, and back-transformed using \texttt{ifft2}.
+    \item A 1D intensity cross-section is extracted across the periodic bars in the central region of interest.
+    \item The contrast is evaluated across periodic elements:
+    \[
+    C = \frac{I_{\max} - I_{\min}}{I_{\max} + I_{\min}}
+    \]
+    According to the Rayleigh criterion, two adjacent bars are considered resolved when the intensity dip between peaks is at least $19\%$ to $26\%$ ($C \ge 0.15\text{--}0.20$).
+\end{enumerate}
+
+\textbf{Observations}
+\begin{enumerate}
+  \item When $NA = 0.01$, the thick bars merges, the contrast decreases;
+  \item when $NA = 0.1$, the smallest element of the target we can see is the group 1, element 1. So, as : $Resolution = 2^{\left( \text{group number}+\frac{\text{element number}-1}{6}\right)}= 2.00 lp/mm$ in line per milimeter. $d = \frac{1}{f} \times 1000 \quad (\mu\text{m})$, so $d =  \mathbf{500\,\mu\text{m}}$.
+  \item when $NA = 1.0$, the smallest element of the target we can see is the group 1, element 2. So, as : $Resolution\approx 2.24 lp/mm$ in line per milimeter. So $d\approx \mathbf{445\,\mu\text{m}}$.
+\end{enumerate}
+
+The natural choice for NA is then $NA = 0.1$
+As the nucleus radius is about $10 \mu m$, thus, it is never discernable. 
 
 
-\section{Resolution and the Pupil Function}
-
-\paragraph{Q3} Using fft2, fftshift, ifft2, simulate imaging of the object for NA = 0.01, 0.1, 1.0.
-Compare the resulting images. Are the cells resolved? The nuclei?
-
-
-
-\section{Imaging Contrast Mechanisms}
+\section{Part 3 - Imaging Contrast Mechanisms}
 \paragraph{Q.4}
 In brightfield, the unscattered light dominates and the transparent cells are barely visible (only the absorbing 
 nuclei and a faint edge). In darkfield, the annular pupil blocks the unscattered (zero-frequency) 
