@@ -13,7 +13,7 @@ class Microscopy:
         nucleus_radius_frac=0.10,
         delta_n=0.02,
         lambda_ref=550e-9,
-        N=512,
+        N=1024,
         L=1.2e-3,
         NA=0.1,
     ):
@@ -392,8 +392,7 @@ class Microscopy:
         pitch_obj = pixel_pitch / magnification
         if pitch_obj < self.dx:
             print(f"Attention : pixel objet ({pitch_obj*1e6:.2f} µm) < dx de la "
-                  f"grille ({self.dx*1e6:.2f} µm) : sur-échantillonnage, "
-                  f"pas d'information en plus. Augmente N.")
+                  f"grille")
         n_pix = int(round(self.L / pitch_obj))
         # INTER_AREA = moyenne sur la surface couverte par chaque pixel,
         # ce qui reproduit l'intégration de la lumière par un vrai pixel
@@ -500,8 +499,9 @@ if __name__ == "__main__":
         ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-    plt.show()
     plt.savefig("figures/part2_Q33_resolution_computation.png")
+    plt.show()
+
     
     sample.contrastModes(NA=0.5)
 
