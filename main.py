@@ -249,9 +249,76 @@ class Microscopy:
         print("=========================================")
         plt.show()
 
+    # ================= PART 3: Imaging contrast mechanisms (Q4, Q5) =================
+
+    def frequencyRadius(self):
+        """Distance to the center in frequency space [1/m] (0 = straight light)."""
+        fx = np.fft.fftshift(np.fft.fftfreq(self.N, d=self.dx))
+        FX, FY = np.meshgrid(fx, fx)
+        return np.sqrt(FX**2 + FY**2)
+
+    def darkfieldPupil(self, NA_in, NA_out):
+        """Q4 - Darkfield: ring-shaped (annular) pupil.
+        The center (straight, unscattered light) is blocked: only the light
+        deflected by the cells, between NA_in and NA_out, reaches the camera."""
+        f = self.frequencyRadius()
+        f_in = NA_in / self.lambda_ref
+        f_out = NA_out / self.lambda_ref
+        return ((f > f_in) & (f <= f_out)).astype(float)
+
+    def phaseContrastPupil(self, NA):
+        """Q5 - Zernike phase contrast: normal disk pupil, but the straight light
+        (zero frequency) is shifted by a quarter wave (multiplied by i)."""
+        pupil = self.computePupil(NA, self.lambda_ref, self.L, self.N).astype(complex)
+        pupil[self.frequencyRadius() == 0] = 1j
+        return pupil
+
+    def imageWithPupil(self, pupil, field=None):
+        """Same as applyPupilImaging, but with any pupil and any input field:
+        FFT -> x pupil -> inverse FFT -> intensity."""
+        if field is None:
+            field = self.get_complex_field()
+        E_fourier = np.fft.fftshift(np.fft.fft2(field))
+        E_out = np.fft.ifft2(np.fft.ifftshift(E_fourier * pupil))
+        return np.abs(E_out) ** 2
+
+    def contrastModes(self, NA=0.5, NA_in=0.05, phi_max_weak=0.3):
+        """Q4 + Q5: compare brightfield, darkfield and phase contrast."""
+        # Q4: brightfield vs darkfield on the real object
+        bright = self.imageWithPupil(self.computePupil(NA, self.lambda_ref, self.L, self.N))
+        dark = self.imageWithPupil(self.darkfieldPupil(NA_in, NA))
+
+        # Q5: weak object -> linearization exp(i phi) ~ 1 + i phi
+        # Our cells reach ~30 rad, far from "weak" (phi << 1):
+        # we rescale the phase to phi_max_weak to stay in the validity domain.
+        phi_weak = self.phase_map / self.phase_map.max() * phi_max_weak
+        field_weak = np.sqrt(self.intensity_map) * (1 + 1j * phi_weak)
+        bright_weak = self.imageWithPupil(
+            self.computePupil(NA, self.lambda_ref, self.L, self.N), field_weak)
+        phase_contrast = self.imageWithPupil(self.phaseContrastPupil(NA), field_weak)
+
+        fov_um = self.L * 1e6
+        extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
+        images = [bright, dark, bright_weak, phase_contrast]
+        titles = [f"Brightfield (NA = {NA})",
+                  f"Darkfield ({NA_in} < NA <= {NA})",
+                  f"Brightfield, weak object",
+                  f"Phase contrast, weak object"]
+
+        fig, axes = plt.subplots(1, 4, figsize=(20, 4.5), constrained_layout=True)
+        for ax, img, title in zip(axes, images, titles):
+            im = ax.imshow(img, cmap="gray", extent=extent, origin="lower")
+            ax.set_title(title)
+            ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        plt.savefig("part3_contrast_modes.png", dpi=150)
+        plt.show()
+
 
 
 if __name__ == "__main__":
+
+    np.random.seed(0)
     #  Cell sample
     sample = Microscopy(n_cells=8)
 
@@ -278,3 +345,5 @@ if __name__ == "__main__":
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
     plt.show()
+    
+    sample.contrastModes(NA=0.5)
