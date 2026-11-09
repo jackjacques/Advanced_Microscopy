@@ -1,6 +1,7 @@
 \documentclass[12pt]{article}
 
 \usepackage{amsmath}
+\usepackage{graphicx}
 
 
 \author{Group}
@@ -11,15 +12,6 @@
 \begin{document}
 
 \maketitle
-
-\section{Part 3}
-\paragraph{Q.4}
-In brightfield, the unscattered light dominates and the transparent cells are barely visible (only the absorbing 
-nuclei and a faint edge). In darkfield, the annular pupil blocks the unscattered (zero-frequency) 
-light: the background becomes black and only light scattered by the cells reaches the camera, so the cells appear bright, 
-mostly at their edges where the phase gradient (light deflection) is strongest. 
-Darkfield reveals the cell outlines but does not give a quantitative phase measurement.
-
 \section{Defining the Object}
 \paragraph{Q1.1} What would the image of such an object look like on a traditional widefield
 microscope? What is the minimum numerical aperture that should allow you to resolve the
@@ -27,7 +19,7 @@ nuclei?
 
 The image object is on an actial widefild microscope, a bunch of cells that have a certain thikness and so absorb a certain amount of light.
 The image is then genuinely a absorbtion spectrum, depending of the phase.
-If $\Delta z \eq0$ (focus):
+If $\Delta z = 0$ (focus):
 A standard camera or the human eye detects only optical intensity $I = \vert{}E\vert{}^2 = 1$. The phase perturbations do not generate amplitude contrast when the object plane is conjugate to the detector.
 
 Out of contrast : $\Delta z \neq 0$
@@ -56,5 +48,37 @@ Compare the resulting images. Are the cells resolved? The nuclei?
 
 
 
+\section{Imaging Contrast Mechanisms}
+\paragraph{Q.4}
+In brightfield, the unscattered light dominates and the transparent cells are barely visible (only the absorbing 
+nuclei and a faint edge). In darkfield, the annular pupil blocks the unscattered (zero-frequency) 
+light: the background becomes black and only light scattered by the cells reaches the camera, so the cells appear bright, 
+mostly at their edges where the phase gradient (light deflection) is strongest. 
+Darkfield reveals the cell outlines but does not give a quantitative phase measurement.
+
+\paragraph{Q5} \textit{Phase contrast (weak object transfer function).}
+
+For a weak phase object ($\varphi \ll 1$), the field can be linearized:
+\[
+E = e^{i\varphi} \approx 1 + i\varphi .
+\]
+The unscattered component (1) and the scattered component ($i\varphi$) are in quadrature,
+so $|1 + i\varphi|^2 = 1 + \varphi^2 \approx 1$: the cells are invisible. A Zernike phase plate
+multiplies the zero frequency by $i$ (quarter-wave shift), giving
+\[
+E' = i + i\varphi = i(1+\varphi) \quad \Rightarrow \quad I = (1+\varphi)^2 \approx 1 + 2\varphi ,
+\]
+so the phase is converted linearly into intensity. Since our cells reach $\varphi \approx 30$ rad,
+far from the weak-object regime, the phase was rescaled to $\varphi_{\max} = 0.3$ rad to stay
+within the validity of the linearization. In brightfield, this weak object is only visible
+through its absorption (panel 3), whereas in phase contrast (panel 4) the cells appear as
+bright disks whose brightness follows the phase map.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.8\textwidth]{figures/part3_contrast_modes.png}
+  \caption{contrast images}
+  \label{fig:part3_contrast_modes}
+\end{figure}
 
 \end{document}

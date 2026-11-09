@@ -59,7 +59,8 @@ targets provided to try and assess the resolution of your system. Explain the me
 are are using as well as your results.
 
 
-\section{Part 3 - Imaging Contrast Mechanisms}
+
+\section{Imaging Contrast Mechanisms}
 \paragraph{Q.4}
 In brightfield, the unscattered light dominates and the transparent cells are barely visible (only the absorbing 
 nuclei and a faint edge). In darkfield, the annular pupil blocks the unscattered (zero-frequency) 
@@ -67,5 +68,29 @@ light: the background becomes black and only light scattered by the cells reache
 mostly at their edges where the phase gradient (light deflection) is strongest. 
 Darkfield reveals the cell outlines but does not give a quantitative phase measurement.
 
+\paragraph{Q5} \textit{Phase contrast (weak object transfer function).}
+
+For a weak phase object ($\varphi \ll 1$), the field can be linearized:
+\[
+E = e^{i\varphi} \approx 1 + i\varphi .
+\]
+The unscattered component (1) and the scattered component ($i\varphi$) are in quadrature,
+so $|1 + i\varphi|^2 = 1 + \varphi^2 \approx 1$: the cells are invisible. A Zernike phase plate
+multiplies the zero frequency by $i$ (quarter-wave shift), giving
+\[
+E' = i + i\varphi = i(1+\varphi) \quad \Rightarrow \quad I = (1+\varphi)^2 \approx 1 + 2\varphi ,
+\]
+so the phase is converted linearly into intensity. Since our cells reach $\varphi \approx 30$ rad,
+far from the weak-object regime, the phase was rescaled to $\varphi_{\max} = 0.3$ rad to stay
+within the validity of the linearization. In brightfield, this weak object is only visible
+through its absorption (panel 3), whereas in phase contrast (panel 4) the cells appear as
+bright disks whose brightness follows the phase map.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.8\textwidth]{figures/part3_contrast_modes.png}
+  \caption{contrast images}
+  \label{fig:part3_contrast_modes}
+\end{figure}
 
 \end{document}

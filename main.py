@@ -28,9 +28,7 @@ class Microscopy:
         self.dx = L / N
         self.NA = NA
 
-        # 1. Grille spatiale
-        coords = np.linspace(-self.L / 2, self.L / 2, self.N)
-        self.X, self.Y = np.meshgrid(coords, coords)
+      
 
         # 2. Cartes d'objet
         self.phase_map, self.intensity_map = self.makeObject(
@@ -55,7 +53,7 @@ class Microscopy:
         delta_n=0.02,
         lambda_ref=550e-9,
         L=1.2e-3,
-        N=512,
+        N=1024,
     ):
         coords = np.linspace(-L / 2, L / 2, N)
         X, Y = np.meshgrid(coords, coords)
