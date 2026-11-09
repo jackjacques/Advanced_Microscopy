@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.11.16)  9 NOV 2026 17:15
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.11.16)  9 NOV 2026 17:16
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -109,8 +109,8 @@ LaTeX Font Info:    ... okay on input line 11.
 LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 11.
 LaTeX Font Info:    ... okay on input line 11.
 
-/Users/hugotrebert/Documents/4A/BME/Imaging/Advanced_Microscopy/Report_Jacques_Angleys.tex:31: Undefined control sequence.
-l.31 If $\Delta z \eq
+/Users/hugotrebert/Documents/4A/BME/Imaging/Advanced_Microscopy/Report_Jacques_Angleys.tex:30: Undefined control sequence.
+l.30 If $\Delta z \eq
                      0$ (focus):
 The control sequence at the end of the top line
 of your error message was never \def'ed. If you have
@@ -139,7 +139,7 @@ Here is how much of TeX's memory you used:
  319 hyphenation exceptions out of 8191
  56i,6n,65p,369b,197s stack positions out of 10000i,1000n,20000p,200000b,200000s
  </Users/hugotrebert/Library/texlive/2025basic/texmf-var/fonts/pk/ljfour/jknappen/ec/tcrm1200.600pk></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi12.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi8.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/amsfonts/cm/cmr17.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb>
-Output written on Report_Jacques_Angleys.pdf (2 pages, 88644 bytes).
+Output written on Report_Jacques_Angleys.pdf (2 pages, 88638 bytes).
 PDF statistics:
  51 PDF objects out of 1000 (max. 8388607)
  31 compressed objects within 1 object stream
