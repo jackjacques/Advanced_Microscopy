@@ -16,6 +16,7 @@ class Microscopy:
         N=1024,
         L=1.2e-3,
         NA=0.1,
+        absorptive=False,
     ):
         self.n_cells = n_cells
         self.cell_radius_mean = cell_radius_mean
@@ -27,10 +28,12 @@ class Microscopy:
         self.L = L
         self.dx = L / N
         self.NA = NA
+        self.absorptive = absorptive
 
-      
+        # --- AJOUTE CES 2 LIGNES ICI ---
+        coords = np.linspace(-self.L / 2, self.L / 2, self.N)
+        self.X, self.Y = np.meshgrid(coords, coords)
 
-        # 2. Cartes d'objet
         self.phase_map, self.intensity_map = self.makeObject(
             n_cells=self.n_cells,
             cell_radius_mean=self.cell_radius_mean,
@@ -40,6 +43,7 @@ class Microscopy:
             lambda_ref=self.lambda_ref,
             L=self.L,
             N=self.N,
+            absorptive=self.absorptive,
         )
 
         self.pupil = self.computePupil(self.NA, self.lambda_ref, self.L, self.N)
@@ -54,6 +58,7 @@ class Microscopy:
         lambda_ref=550e-9,
         L=1.2e-3,
         N=1024,
+        absorptive=False,
     ):
         coords = np.linspace(-L / 2, L / 2, N)
         X, Y = np.meshgrid(coords, coords)
@@ -85,8 +90,9 @@ class Microscopy:
 
             cell_phase = k0 * delta_n * d_cell + k0 * (delta_n * 0.5) * d_nuc
             phase_map = np.maximum(phase_map, cell_phase)
-            intensity_map[mask_cell] = 0.85
-            intensity_map[mask_nuc] = 0.60
+            if absorptive :
+                intensity_map[mask_cell] = np.minimum(intensity_map[mask_cell], 0.85)
+                intensity_map[mask_nuc] = np.minimum(intensity_map[mask_nuc], 0.60)
 
 
         return phase_map, intensity_map
@@ -223,8 +229,12 @@ class Microscopy:
         self,
         image_path="usaf.png",
         NAs=[0.01, 0.1, 1.0],
+        zoom_radius_um=150,
     ):
-        """Simule l'imagerie de la mire USAF et calcule les résolutions associées."""
+        """
+        Simule l'imagerie de la mire USAF et calcule les résolutions associées.
+        Zoom sur le centre et mesure numériquement le contraste sur une coupe 1D transversale.
+        """
         # 1. Chargement avec canal alpha éventuel (UNCHANGED)
         raw_img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
         if raw_img is None:
@@ -282,8 +292,17 @@ class Microscopy:
             E_filtered = E_fft * pupil
             E_out = np.fft.ifft2(np.fft.ifftshift(E_filtered))
             img_detected = np.abs(E_out) ** 2
+            r_center_pix = int((100e-6) / self.dx)
+            c0 = self.N // 2
+            center_crop = img_detected[
+                c0 - r_center_pix : c0 + r_center_pix,
+                c0 - r_center_pix : c0 + r_center_pix,
+            ]
 
-            # Calculs des résolutions théoriques
+            # Contraste sur les motifs centraux
+            c_measured = (center_crop.max() - center_crop.min()) / (
+                center_crop.max() + center_crop.min() + 1e-12
+            )
             r_abbe = (self.lambda_ref / (2 * na)) * 1e6  # en µm
             r_rayleigh = (0.61 * self.lambda_ref / na) * 1e6  # en µm
             fc = na / self.lambda_ref  # Fréquence de coupure en m^-1
@@ -292,6 +311,7 @@ class Microscopy:
             print(f"  - Coupure fc         : {fc*1e-3:.1f} cycles/mm")
             print(f"  - Limite Abbe (λ/2NA): {r_abbe:.2f} µm")
             print(f"  - Critère Rayleigh   : {r_rayleigh:.2f} µm")
+            print(f"  - Contraste mesuré C : {c_measured * 100:.1f} %")
 
             # Affichage normalisé pour éviter l'écran noir
             im = ax.imshow(
@@ -302,7 +322,9 @@ class Microscopy:
                 vmin=np.min(img_detected),
                 vmax=np.max(img_detected),
             )
-            ax.set_title(f"NA = {na}\nRayleigh: {r_rayleigh:.2f} µm")
+            ax.set_title(
+                f"NA = {na}\nRayleigh: {r_rayleigh:.2f} µm | C: {c_measured*100:.0f}%"
+            )            
             ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
             ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
 
@@ -473,7 +495,7 @@ if __name__ == "__main__":
 
     np.random.seed(0)
     #  Cell sample
-    sample = Microscopy(n_cells=8)
+    sample = Microscopy(n_cells=8, absorptive=True)
 
     # Maps
     sample.plot_obj()
@@ -491,7 +513,10 @@ if __name__ == "__main__":
 
     for ax, na in zip(axes, NAs):
         image = sample.applyPupilImaging(na)
-        im = ax.imshow(image, cmap="gray", extent=extent, origin="lower")
+
+        im = ax.imshow(
+            image, cmap="gray", extent=extent, origin="lower", vmin=0, vmax=1
+        )        
         ax.set_title(f"Cellules détectées (NA = {na})")
         ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
         ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
