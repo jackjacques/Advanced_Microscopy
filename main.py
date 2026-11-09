@@ -131,61 +131,51 @@ class Microscopy:
         detected_intensity = np.abs(E_out) ** 2
         return detected_intensity
 
-    def plot_Pupil(self, NA, figsize=(11, 4.5)):
-        pupil = self.computePupil(NA, self.lambda_ref, self.L, self.N)
-        fc = NA / self.lambda_ref
-        fc_cpmm = fc * 1e-3
-        dx = self.L / self.N
-        fx_cpmm = np.fft.fftshift(np.fft.fftfreq(self.N, d=dx)) * 1e-3
-        extent = [
-            fx_cpmm[0],
-            fx_cpmm[-1],
-            fx_cpmm[0],
-            fx_cpmm[-1],
-        ]
-        fig, (ax_pupil, ax_profile) = plt.subplots(
-            1, 2, figsize=figsize, constrained_layout=True
+    def save_figure_pupils(sample, NAs=[0.01, 0.1, 1.0]):
+        fig, axes = plt.subplots(
+            2, len(NAs), figsize=(14, 8), constrained_layout=True
         )
+        dx = sample.L / sample.N
+        fx_cpmm = np.fft.fftshift(np.fft.fftfreq(sample.N, d=dx)) * 1e-3
+        extent = [fx_cpmm[0], fx_cpmm[-1], fx_cpmm[0], fx_cpmm[-1]]
+        centre = sample.N // 2
 
-        im = ax_pupil.imshow(
-            pupil, cmap="gray", extent=extent, origin="lower", vmin=0, vmax=1
-        )
-        ax_pupil.set_title(
-            f"Pupille 2D (NA = {NA})\n$f_c$ = {fc_cpmm:.1f} cycles/mm"
-        )
-        ax_pupil.set_xlabel(r"$f_x\ (\mathrm{cycles/mm})$")
-        ax_pupil.set_ylabel(r"$f_y\ (\mathrm{cycles/mm})$")
-        fig.colorbar(im, ax=ax_pupil, fraction=0.046, pad=0.04).set_label(
-            "Transmission"
-        )
+        for col, na in enumerate(NAs):
+            pupil = sample.computePupil(na, sample.lambda_ref, sample.L, sample.N)
+            fc_cpmm = (na / sample.lambda_ref) * 1e-3
 
-        centre = self.N // 2
-        ax_profile.plot(
-            fx_cpmm, pupil[centre, :], color="crimson", lw=2, label="Profil 1D"
-        )
-        ax_profile.axvline(
-            fc_cpmm,
-            color="black",
-            linestyle="--",
-            alpha=0.7,
-            label=f"+fc ({fc_cpmm:.1f})",
-        )
-        ax_profile.axvline(
-            -fc_cpmm,
-            color="black",
-            linestyle="--",
-            alpha=0.7,
-            label=f"-fc ({-fc_cpmm:.1f})",
-        )
-        ax_profile.set_title("Coupe centrale ($f_y = 0$)")
-        ax_profile.set_xlabel(r"$f_x\ (\mathrm{cycles/mm})$")
-        ax_profile.set_ylabel("Transmission")
-        ax_profile.set_ylim(-0.05, 1.1)
-        ax_profile.grid(True, linestyle=":", alpha=0.6)
-        ax_profile.legend(loc="upper right")
+            # Ligne 1 : Pupille 2D
+            im = axes[0, col].imshow(
+                pupil, cmap="gray", extent=extent, origin="lower", vmin=0, vmax=1
+            )
+            axes[0, col].set_title(
+                f"Pupille 2D (NA = {na})\n$f_c = {fc_cpmm:.1f}$ cycles/mm"
+            )
+            axes[0, col].set_xlabel(r"$f_x\ (\mathrm{cycles/mm})$")
+            axes[0, col].set_ylabel(r"$f_y\ (\mathrm{cycles/mm})$")
+            fig.colorbar(im, ax=axes[0, col], fraction=0.046, pad=0.04)
 
-        plt.show()
-        return fig, (ax_pupil, ax_profile)
+            # Ligne 2 : Profil 1D
+            axes[1, col].plot(
+                fx_cpmm, pupil[centre, :], color="crimson", lw=2, label="Pupille"
+            )
+            axes[1, col].axvline(
+                fc_cpmm,
+                color="black",
+                linestyle="--",
+                alpha=0.7,
+                label=f"+fc ({fc_cpmm:.0f})",
+            )
+            axes[1, col].axvline(-fc_cpmm, color="black", linestyle="--", alpha=0.7)
+            axes[1, col].set_title(f"Coupe 1D ($f_y = 0$) - NA = {na}")
+            axes[1, col].set_xlabel(r"$f_x\ (\mathrm{cycles/mm})$")
+            axes[1, col].set_ylabel("Transmission")
+            axes[1, col].set_ylim(-0.05, 1.1)
+            axes[1, col].grid(True, linestyle=":", alpha=0.6)
+            axes[1, col].legend(loc="upper right", fontsize=8)
+
+        plt.savefig("figures/part2_pupil_and_cutoffs.png", dpi=150)
+        plt.close()
 
 
 
@@ -226,25 +216,13 @@ class Microscopy:
         plt.show()
 
     def resolution(
-        self,
-        image_path="usaf.png",
-        NAs=[0.01, 0.1, 1.0],
-        zoom_radius_um=150,
+        self, image_path="usaf.png", NAs=[0.01, 0.1, 1.0], zoom_radius_um=150
     ):
-        """
-        Simule l'imagerie de la mire USAF et calcule les résolutions associées.
-        Zoom sur le centre et mesure numériquement le contraste sur une coupe 1D transversale.
-        """
-        # 1. Chargement avec canal alpha éventuel (UNCHANGED)
         raw_img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
         if raw_img is None:
-            raise FileNotFoundError(
-                f"Impossible de charger '{image_path}'. Vérifie le nom et le dossier."
-            )
+            raise FileNotFoundError(f"Impossible de charger '{image_path}'")
 
-        # Gestion du canal alpha (transparence SVG -> PNG)
         if raw_img.ndim == 3 and raw_img.shape[2] == 4:
-            # Fond blanc : là où alpha == 0, on met du blanc (255)
             alpha = raw_img[:, :, 3] / 255.0
             gray = cv2.cvtColor(raw_img[:, :, :3], cv2.COLOR_BGR2GRAY)
             img = (gray * alpha + 255 * (1 - alpha)).astype(np.uint8)
@@ -253,83 +231,93 @@ class Microscopy:
         else:
             img = raw_img
 
-        # 2. Redimensionnement et normalisation [0, 1]
         img_resized = cv2.resize(img, (self.N, self.N))
-        target_amplitude = img_resized.astype(float) / 255.0
+        target = img_resized.astype(float) / 255.0
+        if np.mean(target) < 0.5:
+            target = 1.0 - target
 
-        # Si l'image est inversée (fond noir au lieu de blanc), on ré-inverse
-        if np.mean(target_amplitude) < 0.5:
-            target_amplitude = 1.0 - target_amplitude
-
-        # 3. Champ d'onde incident et TF 2D
-        E_in = target_amplitude.astype(complex)
+        E_in = target.astype(complex)
         E_fft = np.fft.fftshift(np.fft.fft2(E_in))
 
         fov_um = self.L * 1e6
         extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
 
+        # 2 lignes : Plein champ en haut, Zoom central en bas
         fig, axes = plt.subplots(
-            1, len(NAs) + 1, figsize=(16, 4.5), constrained_layout=True
+            2, len(NAs) + 1, figsize=(16, 7.5), constrained_layout=True
         )
 
-        # Affichage de la mire originale
-        axes[0].imshow(
-            target_amplitude,
+        # Mire originale
+        axes[0, 0].imshow(
+            target,
             cmap="gray",
             extent=extent,
             origin="lower",
             vmin=0,
             vmax=1,
         )
-        axes[0].set_title("Mire originale")
-        axes[0].set_xlabel(r"$x\ (\mu\mathrm{m})$")
-        axes[0].set_ylabel(r"$y\ (\mu\mathrm{m})$")
+        axes[0, 0].set_title("Mire originale")
+        axes[1, 0].imshow(
+            target,
+            cmap="gray",
+            extent=extent,
+            origin="lower",
+            vmin=0,
+            vmax=1,
+        )
+        axes[1, 0].set_title("Zoom centre")
+        axes[1, 0].set_xlim(-zoom_radius_um, zoom_radius_um)
+        axes[1, 0].set_ylim(-zoom_radius_um, zoom_radius_um)
 
-        print("=== RÉSULTATS DE RÉSOLUTION THÉORIQUE ===")
-        # 4. Simulation pour chaque NA
-        for ax, na in zip(axes[1:], NAs):
+        r_center_pix = int((zoom_radius_um * 1e-6) / self.dx)
+        c0 = self.N // 2
+
+        for col, na in enumerate(NAs, start=1):
             pupil = self.computePupil(na, self.lambda_ref, self.L, self.N)
-            E_filtered = E_fft * pupil
-            E_out = np.fft.ifft2(np.fft.ifftshift(E_filtered))
-            img_detected = np.abs(E_out) ** 2
-            r_center_pix = int((100e-6) / self.dx)
-            c0 = self.N // 2
-            center_crop = img_detected[
+            E_out = np.fft.ifft2(np.fft.ifftshift(E_fft * pupil))
+            img_det = np.abs(E_out) ** 2
+
+            # Contraste calculé sur la région centrale (mires fines)
+            crop = img_det[
                 c0 - r_center_pix : c0 + r_center_pix,
                 c0 - r_center_pix : c0 + r_center_pix,
             ]
-
-            # Contraste sur les motifs centraux
-            c_measured = (center_crop.max() - center_crop.min()) / (
-                center_crop.max() + center_crop.min() + 1e-12
+            c_measured = (crop.max() - crop.min()) / max(
+                crop.max() + crop.min(), 1e-12
             )
-            r_abbe = (self.lambda_ref / (2 * na)) * 1e6  # en µm
-            r_rayleigh = (0.61 * self.lambda_ref / na) * 1e6  # en µm
-            fc = na / self.lambda_ref  # Fréquence de coupure en m^-1
+            r_rayleigh = (0.61 * self.lambda_ref / na) * 1e6
 
-            print(f"NA = {na:4.2f} :")
-            print(f"  - Coupure fc         : {fc*1e-3:.1f} cycles/mm")
-            print(f"  - Limite Abbe (λ/2NA): {r_abbe:.2f} µm")
-            print(f"  - Critère Rayleigh   : {r_rayleigh:.2f} µm")
-            print(f"  - Contraste mesuré C : {c_measured * 100:.1f} %")
-
-            # Affichage normalisé pour éviter l'écran noir
-            im = ax.imshow(
-                img_detected,
+            # Ligne 1 : Champ complet
+            axes[0, col].imshow(
+                img_det,
                 cmap="gray",
                 extent=extent,
                 origin="lower",
-                vmin=np.min(img_detected),
-                vmax=np.max(img_detected),
+                vmin=img_det.min(),
+                vmax=img_det.max(),
             )
-            ax.set_title(
+            axes[0, col].set_title(
                 f"NA = {na}\nRayleigh: {r_rayleigh:.2f} µm | C: {c_measured*100:.0f}%"
-            )            
-            ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
-            ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
+            )
+            axes[0, col].set_xlabel(r"$x\ (\mu\mathrm{m})$")
 
-        print("=========================================")
-        plt.savefig("figures/part2_Resolution_calibration_USAF1951.png", dpi=150)
+            # Ligne 2 : Zoom central
+            axes[1, col].imshow(
+                img_det,
+                cmap="gray",
+                extent=extent,
+                origin="lower",
+                vmin=img_det.min(),
+                vmax=img_det.max(),
+            )
+            axes[1, col].set_title(f"Zoom centre (NA = {na})")
+            axes[1, col].set_xlim(-zoom_radius_um, zoom_radius_um)
+            axes[1, col].set_ylim(-zoom_radius_um, zoom_radius_um)
+            axes[1, col].set_xlabel(r"$x\ (\mu\mathrm{m})$")
+
+        plt.savefig(
+            "figures/part2_Resolution_calibration_USAF1951.png", dpi=150
+        )
         plt.show()
 
     # ================= PART 3: Imaging contrast mechanisms (Q4, Q5) =================
@@ -495,11 +483,11 @@ if __name__ == "__main__":
 
     np.random.seed(0)
     #  Cell sample
-    sample = Microscopy(n_cells=8, absorptive=True)
+    sample = Microscopy(n_cells=10, absorptive=True)
 
     # Maps
     sample.plot_obj()
-
+    sample.save_figure_pupils()
     # USAF resolutions
     sample.resolution("usaf.png")
 
@@ -522,7 +510,7 @@ if __name__ == "__main__":
         ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-    plt.savefig("figures/part2_Q33_resolution_computation.png")
+    plt.savefig("figures/part2_cells_vs_NA.png")
     plt.show()
 
     
