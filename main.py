@@ -13,8 +13,8 @@ class Microscopy:
         nucleus_radius_frac=0.10,
         delta_n=0.02,
         lambda_ref=550e-9,
-        N=1024,
-        L=1.2-3,
+        N=512,
+        L=1.2e-3,
         NA=0.1,
     ):
         self.n_cells = n_cells
