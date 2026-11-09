@@ -314,40 +314,6 @@ class Microscopy:
         plt.savefig("figures/part3_contrast_modes.png", dpi=150)
         plt.show()
 
-
-
-if __name__ == "__main__":
-
-    np.random.seed(0)
-    #  Cell sample
-    sample = Microscopy(n_cells=8)
-
-    # Maps
-    sample.plot_obj()
-
-    # USAF resolutions
-    sample.resolution("usaf.png")
-
-    NAs = [0.01, 0.1, 1.0]
-    fov_um = sample.L * 1e6
-    extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
-
-    fig, axes = plt.subplots(
-        1, len(NAs), figsize=(15, 4.5), constrained_layout=True
-    )
-
-    for ax, na in zip(axes, NAs):
-        image = sample.applyPupilImaging(na)
-        im = ax.imshow(image, cmap="gray", extent=extent, origin="lower")
-        ax.set_title(f"Cellules détectées (NA = {na})")
-        ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
-        ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
-        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-
-    plt.show()
-    
-    sample.contrastModes(NA=0.5)
-
     # ================= PART 4 : Échantillonnage du détecteur et bruit (Q6) =================
 
     def addCameraEffects(self, image, pixel_pitch, snr, magnification=1.0, seed=None):
@@ -425,4 +391,75 @@ if __name__ == "__main__":
         plt.savefig("part4_camera.png", dpi=150)
         plt.show()
 
+    def fresnelPropagate(self, field, dz, wavelength=None):
+        
+        wl = self.lambda_ref if wavelength is None else wavelength
+        f = np.fft.fftfreq(self.N, d=self.dx)
+        FX, FY = np.meshgrid(f, f)
 
+        arg = 1.0 - (wl * FX) ** 2 - (wl * FY) ** 2
+        propagating = arg > 0                       # ondes évanescentes (arg < 0) : supprimées
+        kz = 2 * np.pi / wl * np.sqrt(np.maximum(arg, 0.0))
+        H = np.exp(1j * kz * dz) * propagating
+
+        return np.fft.ifft2(np.fft.fft2(field) * H)
+    
+
+    
+
+
+
+if __name__ == "__main__":
+
+    np.random.seed(0)
+    #  Cell sample
+    sample = Microscopy(n_cells=8)
+
+    # Maps
+    sample.plot_obj()
+
+    # USAF resolutions
+    sample.resolution("usaf.png")
+
+    NAs = [0.01, 0.1, 1.0]
+    fov_um = sample.L * 1e6
+    extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
+
+    fig, axes = plt.subplots(
+        1, len(NAs), figsize=(15, 4.5), constrained_layout=True
+    )
+
+    for ax, na in zip(axes, NAs):
+        image = sample.applyPupilImaging(na)
+        im = ax.imshow(image, cmap="gray", extent=extent, origin="lower")
+        ax.set_title(f"Cellules détectées (NA = {na})")
+        ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
+        ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    plt.show()
+    
+    sample.contrastModes(NA=0.5)
+
+    # ================= PARTIE 4 : Échantillonnage et Bruit (Q6) =================
+    sample.cameraComparison(NA=0.5)
+
+    # ================= PARTIE 5 : Défocalisation et Profondeur de Champ (Q7) =================
+    dz = 20e-6  # Défocalisation de 20 µm
+    field_in = sample.get_complex_field()
+    
+    # Propagation de Fresnel en amont du système d'imagerie
+    field_defocused = sample.fresnelPropagate(field_in, dz=dz)
+    
+    # Imagerie du champ défocalisé avec une NA de 0.5
+    pupil = sample.computePupil(NA=0.5, lambda_ref=sample.lambda_ref, L=sample.L, N=sample.N)
+    image_defocused = sample.imageWithPupil(pupil, field=field_defocused)
+
+    # Affichage de l'image défocalisée
+    plt.figure(figsize=(6, 5), constrained_layout=True)
+    plt.imshow(image_defocused, cmap="gray", extent=extent, origin="lower")
+    plt.title(f"Image défocalisée (dz = {dz*1e6:.0f} µm, NA = 0.5)")
+    plt.xlabel(r"$x\ (\mu\mathrm{m})$")
+    plt.ylabel(r"$y\ (\mu\mathrm{m})$")
+    plt.colorbar(label="Intensité")
+    plt.show()
