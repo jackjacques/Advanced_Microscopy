@@ -13,8 +13,8 @@ class Microscopy:
         nucleus_radius_frac=0.10,
         delta_n=0.02,
         lambda_ref=550e-9,
-        N=512,
-        L=1.2e-3,
+        N=1024,
+        L=1.2-3,
         NA=0.1,
     ):
         self.n_cells = n_cells
@@ -93,6 +93,9 @@ class Microscopy:
 
         return phase_map, intensity_map
 
+
+    # ================= PART 2: Resolution and the Pupil Function (Q2, Q3) =================
+
     @staticmethod
     def computePupil(NA, lambda_ref, L, N):
         """Masque binaire circulaire dans l'espace de Fourier."""
@@ -123,6 +126,64 @@ class Microscopy:
 
         detected_intensity = np.abs(E_out) ** 2
         return detected_intensity
+
+    def plot_Pupil(self, NA, figsize=(11, 4.5)):
+        pupil = self.computePupil(NA, self.lambda_ref, self.L, self.N)
+        fc = NA / self.lambda_ref
+        fc_cpmm = fc * 1e-3
+        dx = self.L / self.N
+        fx_cpmm = np.fft.fftshift(np.fft.fftfreq(self.N, d=dx)) * 1e-3
+        extent = [
+            fx_cpmm[0],
+            fx_cpmm[-1],
+            fx_cpmm[0],
+            fx_cpmm[-1],
+        ]
+        fig, (ax_pupil, ax_profile) = plt.subplots(
+            1, 2, figsize=figsize, constrained_layout=True
+        )
+
+        im = ax_pupil.imshow(
+            pupil, cmap="gray", extent=extent, origin="lower", vmin=0, vmax=1
+        )
+        ax_pupil.set_title(
+            f"Pupille 2D (NA = {NA})\n$f_c$ = {fc_cpmm:.1f} cycles/mm"
+        )
+        ax_pupil.set_xlabel(r"$f_x\ (\mathrm{cycles/mm})$")
+        ax_pupil.set_ylabel(r"$f_y\ (\mathrm{cycles/mm})$")
+        fig.colorbar(im, ax=ax_pupil, fraction=0.046, pad=0.04).set_label(
+            "Transmission"
+        )
+
+        centre = self.N // 2
+        ax_profile.plot(
+            fx_cpmm, pupil[centre, :], color="crimson", lw=2, label="Profil 1D"
+        )
+        ax_profile.axvline(
+            fc_cpmm,
+            color="black",
+            linestyle="--",
+            alpha=0.7,
+            label=f"+fc ({fc_cpmm:.1f})",
+        )
+        ax_profile.axvline(
+            -fc_cpmm,
+            color="black",
+            linestyle="--",
+            alpha=0.7,
+            label=f"-fc ({-fc_cpmm:.1f})",
+        )
+        ax_profile.set_title("Coupe centrale ($f_y = 0$)")
+        ax_profile.set_xlabel(r"$f_x\ (\mathrm{cycles/mm})$")
+        ax_profile.set_ylabel("Transmission")
+        ax_profile.set_ylim(-0.05, 1.1)
+        ax_profile.grid(True, linestyle=":", alpha=0.6)
+        ax_profile.legend(loc="upper right")
+
+        plt.show()
+        return fig, (ax_pupil, ax_profile)
+
+
 
     def plot_obj(self, figsize=(11, 4.5)):
         fov_um = self.L * 1e6
@@ -157,6 +218,7 @@ class Microscopy:
             im_phase, ax=ax_phase, fraction=0.046, pad=0.04
         ).set_label("Phase (rad)")
 
+        plt.savefig("figures/part1_Intensity_and_Phase_maps.png", dpi=150)
         plt.show()
 
     def resolution(
@@ -247,6 +309,7 @@ class Microscopy:
             ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
 
         print("=========================================")
+        plt.savefig("figures/part2_Resolution_calibration_USAF1951.png", dpi=150)
         plt.show()
 
     # ================= PART 3: Imaging contrast mechanisms (Q4, Q5) =================
@@ -438,6 +501,7 @@ if __name__ == "__main__":
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
     plt.show()
+    plt.savefig("figures/part2_Q33_resolution_computation.png")
     
     sample.contrastModes(NA=0.5)
 
