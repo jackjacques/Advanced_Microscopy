@@ -4,3 +4,13 @@ env/
 /figures
 .vscode/
 __pycache__/
+
+cat << 'EOF' >> .gitignore
+*.aux
+*.log
+*.out
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+*.toc
+EOF
