@@ -1,0 +1,71 @@
+\documentclass[12pt]{article}
+
+\usepackage{amsmath}
+
+
+\author{Group}
+\title{Lab report - Microscopy Imaging - How to build a virtual microscope}
+\date{\today}
+
+
+\begin{document}
+
+\maketitle
+
+
+
+\section{Part 1 - Defining the Object}
+\paragraph{Q1.1} What would the image of such an object look like on a traditional widefield
+microscope? What is the minimum numerical aperture that should allow you to resolve the
+nuclei?
+
+The image object is on an actial widefild microscope, a bunch of cells that have a certain thikness and so absorb a certain amount of light.
+The image is then genuinely a absorbtion spectrum, depending of the phase.
+If $\Delta z = 0$ (focus):
+A standard camera or the human eye detects only optical intensity $I = \vert{}E\vert{}^2 = 1$. The phase perturbations do not generate amplitude contrast when the object plane is conjugate to the detector.
+
+Out of contrast : $\Delta z \neq 0$
+Cell boundaries and the refractive index gradient between the nucleus and the cytoplasm become visible as bright and dark diffraction fringes (haloes) around the edges.
+
+For the numerical apperture:
+$$R_{\text{nuc}} = 50\,\mu\text{m} \times 0.10 = 5\,\mu\text{m}$$
+$$\Leftrightarrow$$
+$$D_{\text{nuc}} = 2 \times R_{\text{nuc}} = 10\,\mu\text{m}$$
+So, we need to compute the diffraction limits.
+To resolve the object of diameter $D_{nuc}$, we must use two differents metrics:
+\begin {itemize}
+    \item Abbe Resolution Limit:$$d_{\text{min}} = \frac{\lambda}{2 \cdot NA} \le D_{\text{nuc}} \implies NA \ge \frac{\lambda}{2 D_{\text{nuc}}}$$ $$\Leftrightarrow$$ $$NA \ge \frac{0.55\,\mu\text{m}}{2 \times 10\,\mu\text{m}} = \mathbf{0.0275}$$
+    \item Rayleigh Criterion:$$r_{\text{Rayleigh}} = 0.61 \frac{\lambda}{NA} \le D_{\text{nuc}} \implies NA \ge 0.61 \frac{\lambda}{D_{\text{nuc}}}$$ $$\Leftrightarrow$$ $$NA \ge 0.61 \times \frac{0.55\,\mu\text{m}}{10\,\mu\text{m}} \approx \mathbf{0.034}$$
+\end{itemize}
+So, the absolute theoretical lower bound to resolve the nucleus as an individual feature is $NA \approx 0.034$.
+
+\paragraph{Q1.2} What kind of technique could be used to retrieve information from a sample that is
+mostly transparent?
+
+
+
+\section{Part 2 - Resolution and the Pupil Function}
+
+\paragraph{Q3} Using fft2, fftshift, ifft2, simulate imaging of the object for NA = 0.01, 0.1, 1.0.
+Compare the resulting images. Are the cells resolved? The nuclei?
+
+\paragraph{Q3.1} Where is the pupil of the objective physically located?
+
+\paragraph{Q3.2} Intuitively, how come the process of imaging through an optical system involves
+Fourier transforms?
+
+\paragraph{Q3.3} A target can be used to quantify the resolution of a microscope. Use the different
+targets provided to try and assess the resolution of your system. Explain the method you
+are are using as well as your results.
+
+
+\section{Part 3 - Imaging Contrast Mechanisms}
+\paragraph{Q.4}
+In brightfield, the unscattered light dominates and the transparent cells are barely visible (only the absorbing 
+nuclei and a faint edge). In darkfield, the annular pupil blocks the unscattered (zero-frequency) 
+light: the background becomes black and only light scattered by the cells reaches the camera, so the cells appear bright, 
+mostly at their edges where the phase gradient (light deflection) is strongest. 
+Darkfield reveals the cell outlines but does not give a quantitative phase measurement.
+
+
+\end{document}
