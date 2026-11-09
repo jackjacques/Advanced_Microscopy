@@ -311,7 +311,7 @@ class Microscopy:
             ax.set_title(title)
             ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
             fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        plt.savefig("part3_contrast_modes.png", dpi=150)
+        plt.savefig("figures/part3_contrast_modes.png", dpi=150)
         plt.show()
 
     # ================= PART 4 : Échantillonnage du détecteur et bruit (Q6) =================
