@@ -510,6 +510,41 @@ class Microscopy:
         return image_two_layers
     
 
+    # ================= PART 6 =================
+    def assembleMicroscope(self, NA, dz=0.0, pixel_pitch=3.45e-6,
+                           magnification=10.0, snr=50, field=None, seed=None):
+        """Pipeline complet : propagation -> pupille -> détecteur avec bruit."""
+        if field is None:
+            field = self.get_complex_field()
+
+        # 1. Défocus (si dz = 0, l'objet est exactement au plan focal)
+        if dz != 0:
+            field = self.fresnelPropagate(field, dz)
+
+        # 2. Filtrage par la pupille de l'objectif
+        pupil = self.computePupil(NA, self.lambda_ref, self.L, self.N)
+        image = self.imageWithPupil(pupil, field)
+        image = image / image.max()
+
+        # 3. Caméra : intégration par pixel + bruit de Poisson
+        return self.addCameraEffects(image, pixel_pitch, snr,
+                                     magnification=magnification, seed=seed)
+
+
+
+    def imageRealCells(self, image_path, NA, mode="amplitude", phi_max=1.0, **kwargs):
+        raw = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        if raw is None:
+            raise FileNotFoundError(f"Impossible de charger '{image_path}'.")
+        img = cv2.resize(raw, (self.N, self.N)).astype(float) / 255.0
+
+        if mode == "amplitude":      # image vue comme une transmission
+            field = np.sqrt(img).astype(complex)
+        else:                        # image vue comme une carte de phase
+            field = np.exp(1j * phi_max * img)
+
+        return self.assembleMicroscope(NA, field=field, **kwargs)
+
     
 
 
@@ -582,5 +617,41 @@ if __name__ == "__main__":
     plt.ylabel(r"$y\ (\mu\mathrm{m})$")
     plt.colorbar(label="Intensité")
     plt.savefig("figures/part5_two_layers.png", dpi=150)
+    plt.show()
+
+
+        # ================= PARTIE 6 : Microscope complet (Q9, Q10, Q11) =================
+    # Grille plus fine pour que la pupille de NA 0.25 tienne dans la grille de calcul
+    hr = Microscopy(n_cells=5, L=0.4e-3, N=2048, NA=0.25, absorptive=True)
+
+    # Q10 : objectif 10X NA 0.25, caméra pixel 3.45 µm, SNR 60
+    final = hr.assembleMicroscope(NA=0.25, dz=0, pixel_pitch=3.45e-6,
+                                  magnification=10, snr=60, seed=0)
+
+    fov_um = hr.L * 1e6
+    extent_hr = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
+
+    plt.figure(figsize=(6, 5), constrained_layout=True)
+    plt.imshow(final, cmap="gray", extent=extent_hr, origin="lower",
+               interpolation="nearest")
+    plt.title("Image finale simulée (10X, NA = 0.25, pixel 3.45 µm, SNR = 60)")
+    plt.xlabel(r"$x\ (\mu\mathrm{m})$")
+    plt.ylabel(r"$y\ (\mu\mathrm{m})$")
+    plt.colorbar(label="Intensité")
+    plt.savefig("figures/part6_final_image.png", dpi=150)
+    plt.show()
+
+    # Q11 : image réelle de cellules (remplace par le nom du fichier fourni)
+    real = hr.imageRealCells("Red Blood Cells DIC 8um.jpg", NA=0.25, pixel_pitch=3.45e-6,
+                             magnification=10, snr=60, seed=0)
+
+    plt.figure(figsize=(6, 5), constrained_layout=True)
+    plt.imshow(real, cmap="gray", extent=extent_hr, origin="lower",
+               interpolation="nearest")
+    plt.title("Image réelle de cellules à travers le microscope virtuel")
+    plt.xlabel(r"$x\ (\mu\mathrm{m})$")
+    plt.ylabel(r"$y\ (\mu\mathrm{m})$")
+    plt.colorbar(label="Intensité")
+    plt.savefig("figures/part6_real_cells.png", dpi=150)
     plt.show()
 
