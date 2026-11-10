@@ -16,7 +16,7 @@ class Microscopy:
         N=1024,
         L=1.2e-3,
         NA=0.1,
-        absorptive=False,
+        nucleus_amplitude=0.95,
     ):
         self.n_cells = n_cells
         self.cell_radius_mean = cell_radius_mean
@@ -28,13 +28,10 @@ class Microscopy:
         self.L = L
         self.dx = L / N
         self.NA = NA
-        self.absorptive = absorptive
+        self.nucleus_amplitude = nucleus_amplitude
 
-        # --- AJOUTE CES 2 LIGNES ICI ---
-        coords = np.linspace(-self.L / 2, self.L / 2, self.N)
-        self.X, self.Y = np.meshgrid(coords, coords)
+        self.X, self.Y = self.makeGrid(self.N, self.dx)
 
-        # 2. Cartes d'objet
         self.phase_map, self.intensity_map = self.makeObject(
             n_cells=self.n_cells,
             cell_radius_mean=self.cell_radius_mean,
@@ -44,10 +41,16 @@ class Microscopy:
             lambda_ref=self.lambda_ref,
             L=self.L,
             N=self.N,
-            absorptive=self.absorptive,
+            nucleus_amplitude=self.nucleus_amplitude,
         )
 
         self.pupil = self.computePupil(self.NA, self.lambda_ref, self.L, self.N)
+
+    @staticmethod
+    def makeGrid(N, dx):
+        """Grille centrée x = (-N/2 ... N/2-1) * dx, cohérente avec np.fft.fftfreq(N, dx)."""
+        x = (np.arange(N) - N // 2) * dx
+        return np.meshgrid(x, x)
 
     @staticmethod
     def makeObject(
@@ -59,44 +62,54 @@ class Microscopy:
         lambda_ref=550e-9,
         L=1.2e-3,
         N=1024,
-        absorptive=False,
+        nucleus_amplitude=0.95,
     ):
-        coords = np.linspace(-L / 2, L / 2, N)
-        X, Y = np.meshgrid(coords, coords)
+        """
+        Objet synthétique : cellules transparentes (objets de phase) avec un noyau
+        légèrement absorbant (d'après makeObject.m fourni par l'enseignant).
+
+        Retourne (phase_map en rad, intensity_map = amplitude**2 dans [0, 1]).
+        """
+        X, Y = Microscopy.makeGrid(N, L / N)
 
         phase_map = np.zeros((N, N))
-        intensity_map = np.ones((N, N))
-
-        k0 = 2 * np.pi / lambda_ref
-        limit = L / 2 - cell_radius_mean
+        amp_map = np.ones((N, N))
 
         for _ in range(n_cells):
-            x0 = np.random.uniform(-limit, limit)
-            y0 = np.random.uniform(-limit, limit)
+            # Centre aléatoire dans 80 % du champ de vision
+            cx = (np.random.rand() - 0.5) * L * 0.8
+            cy = (np.random.rand() - 0.5) * L * 0.8
 
-            R_cell = max(
-                10e-6, np.random.normal(cell_radius_mean, cell_radius_sigma)
+            # Rayon cellulaire aléatoire (gaussien), borné pour rester physique
+            cell_radius = max(
+                1e-6, cell_radius_mean + cell_radius_sigma * np.random.randn()
             )
-            R_nuc = R_cell * nucleus_radius_frac
+            nucleus_radius = nucleus_radius_frac * cell_radius
 
-            dist_sq = (X - x0) ** 2 + (Y - y0) ** 2
+            # Décalage aléatoire du noyau à l'intérieur de la cellule
+            nuc_dx = (np.random.rand() - 0.5) * cell_radius * 0.5
+            nuc_dy = (np.random.rand() - 0.5) * cell_radius * 0.5
 
-            mask_cell = dist_sq < R_cell**2
-            d_cell = np.zeros_like(X)
-            d_cell[mask_cell] = 2 * np.sqrt(R_cell**2 - dist_sq[mask_cell])
+            R_cell = np.sqrt((X - cx) ** 2 + (Y - cy) ** 2)
+            R_nuc = np.sqrt((X - (cx + nuc_dx)) ** 2 + (Y - (cy + nuc_dy)) ** 2)
 
-            mask_nuc = dist_sq < R_nuc**2
-            d_nuc = np.zeros_like(X)
-            d_nuc[mask_nuc] = 2 * np.sqrt(R_nuc**2 - dist_sq[mask_nuc])
+            # Épaisseur de la cellule (approximation sphère / lentille)
+            thickness = np.zeros((N, N))
+            inside = R_cell <= cell_radius
+            thickness[inside] = 2 * np.sqrt(cell_radius**2 - R_cell[inside] ** 2)
 
-            cell_phase = k0 * delta_n * d_cell + k0 * (delta_n * 0.5) * d_nuc
-            phase_map = np.maximum(phase_map, cell_phase)
-            if absorptive :
-                intensity_map[mask_cell] = np.minimum(intensity_map[mask_cell], 0.85)
-                intensity_map[mask_nuc] = np.minimum(intensity_map[mask_nuc], 0.60)
+            # Phase induite : 2*pi * delta_n * épaisseur / lambda
+            phi_cell = 2 * np.pi * delta_n * thickness / lambda_ref
 
+            # Absorption uniquement dans le noyau
+            amp_cell = np.ones((N, N))
+            amp_cell[R_nuc < nucleus_radius] = nucleus_amplitude
 
-        return phase_map, intensity_map
+            # Les phases s'additionnent, les transmissions se multiplient
+            phase_map += phi_cell
+            amp_map *= amp_cell
+
+        return phase_map, amp_map**2
 
 
     # ================= PART 2: Resolution and the Pupil Function (Q2, Q3) =================
@@ -180,7 +193,7 @@ class Microscopy:
 
 
 
-    def plot_obj(self, figsize=(11, 4.5)):
+    def plot_obj(self, figsize=(11, 4.5), save_path="figures/part1_Intensity_and_Phase_maps.png"):
         fov_um = self.L * 1e6
         extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
 
@@ -189,30 +202,24 @@ class Microscopy:
         )
 
         im_int = ax_int.imshow(
-            self.intensity_map,
-            cmap="gray",
-            extent=extent,
-            origin="lower",
-            vmin=0,
-            vmax=1,
+            self.intensity_map, cmap="gray", extent=extent, origin="lower",
+            vmin=self.intensity_map.min(), vmax=1,
         )
-        ax_int.set_title(r"Intensité transmise $I(x, y)$")
+        ax_int.set_title(r"Transmitted intensity $I(x, y)$")
         ax_int.set_xlabel(r"$x\ (\mu\mathrm{m})$")
         ax_int.set_ylabel(r"$y\ (\mu\mathrm{m})$")
-        fig.colorbar(
-            im_int, ax=ax_int, fraction=0.046, pad=0.04
-        ).set_label("Transmission")
+        fig.colorbar(im_int, ax=ax_int, fraction=0.046, pad=0.04).set_label("Transmission")
 
         im_phase = ax_phase.imshow(
             self.phase_map, cmap="viridis", extent=extent, origin="lower"
         )
-        ax_phase.set_title(r"Carte de phase $\Delta\phi(x, y)$")
+        ax_phase.set_title(r"Phase map $\Delta\phi(x, y)$")
         ax_phase.set_xlabel(r"$x\ (\mu\mathrm{m})$")
         ax_phase.set_ylabel(r"$y\ (\mu\mathrm{m})$")
-        fig.colorbar(
-            im_phase, ax=ax_phase, fraction=0.046, pad=0.04
-        ).set_label("Phase (rad)")
+        fig.colorbar(im_phase, ax=ax_phase, fraction=0.046, pad=0.04).set_label("Phase (rad)")
 
+        if save_path:
+            plt.savefig(save_path, dpi=150)
         plt.show()
 
     def resolution(
@@ -496,7 +503,13 @@ class Microscopy:
         
         # 2. Génération d'une deuxième couche (deuxième objet indépendant) 
         # et propagation de Fresnel sur la distance dz
-        phase2, intensity2 = self.makeObject() # Adaptez selon votre méthode de création d'objet
+        phase2, intensity2 = self.makeObject(
+            n_cells=self.n_cells, cell_radius_mean=self.cell_radius_mean,
+            cell_radius_sigma=self.cell_radius_sigma,
+            nucleus_radius_frac=self.nucleus_radius_frac, delta_n=self.delta_n,
+            lambda_ref=self.lambda_ref, L=self.L, N=self.N,
+            nucleus_amplitude=self.nucleus_amplitude,
+        )
         E2_initial = np.sqrt(intensity2) * np.exp(1j * phase2)
         E2_propagated = self.fresnelPropagate(E2_initial, dz=dz)
         
@@ -553,7 +566,7 @@ if __name__ == "__main__":
 
     np.random.seed(0)
     #  Cell sample
-    sample = Microscopy(n_cells=8, absorptive=True)
+    sample = Microscopy(n_cells=8)
 
     # Maps
     sample.plot_obj()
@@ -622,7 +635,7 @@ if __name__ == "__main__":
 
         # ================= PARTIE 6 : Microscope complet (Q9, Q10, Q11) =================
     # Grille plus fine pour que la pupille de NA 0.25 tienne dans la grille de calcul
-    hr = Microscopy(n_cells=5, L=0.4e-3, N=2048, NA=0.25, absorptive=True)
+    hr = Microscopy(n_cells=5, L=0.4e-3, N=2048, NA=0.25)
 
     # Q10 : objectif 10X NA 0.25, caméra pixel 3.45 µm, SNR 60
     final = hr.assembleMicroscope(NA=0.25, dz=0, pixel_pitch=3.45e-6,

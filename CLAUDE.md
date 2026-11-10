@@ -25,7 +25,7 @@ There are no tests or linter. `main.py` calls `plt.show()` between parts, so a r
 
 Everything lives in the `Microscopy` class, with methods grouped by assignment part (section banners like `# ===== PART 2 ... =====`):
 
-- **Object (Part 1)**: `__init__` builds an `N×N` grid over a field of view `L` (pixel `dx = L/N`), then `makeObject` generates random cells with nuclei as an `intensity_map` and a `phase_map` (phase from `delta_n`, `lambda_ref`). `absorptive=True` makes the object attenuate, not just phase-shift. `get_complex_field()` returns `sqrt(I)·exp(iφ)`, which is the input to every imaging step.
+- **Object (Part 1)**: `makeGrid` builds the FFT-consistent `N×N` grid `(k - N/2)·dx` with `dx = L/N`. `makeObject` follows the professor's reference `makeObject.docx` (MATLAB): transparent spherical cells whose phases add, plus a slightly absorbing, randomly offset nucleus (amplitude `nucleus_amplitude=0.95`) whose transmissions multiply. It returns `phase_map` and `intensity_map = amplitude²`, so the object is almost a pure phase object. `get_complex_field()` returns `sqrt(I)·exp(iφ)`, which is the input to every imaging step.
 - **Imaging (Part 2)**: 4f-system model — FFT (with `fftshift`) → multiply by a pupil mask in frequency space → inverse FFT → `|E|²`. `computePupil` is a circular cutoff at `fc = NA/λ`. `resolution()` measures resolution on the USAF 1951 target (`usaf.png`).
 - **Contrast modes (Part 3)**: alternative pupils (`darkfieldPupil`, `phaseContrastPupil`) applied through the generic `imageWithPupil(pupil, field)`.
 - **Camera (Part 4)**: `addCameraEffects` does pixel integration (pitch / magnification) plus Poisson noise for a target SNR.
