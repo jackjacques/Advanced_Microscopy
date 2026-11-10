@@ -518,7 +518,7 @@ if __name__ == "__main__":
 
     np.random.seed(0)
     #  Cell sample
-    sample = Microscopy(n_cells=8)
+    sample = Microscopy(n_cells=8, absorptive=True)
 
     # Maps
     sample.plot_obj()
