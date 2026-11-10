@@ -570,6 +570,7 @@ if __name__ == "__main__":
     plt.xlabel(r"$x\ (\mu\mathrm{m})$")
     plt.ylabel(r"$y\ (\mu\mathrm{m})$")
     plt.colorbar(label="Intensité")
+    plt.savefig("figures/part5_defocus.png", dpi=150)
     plt.show()   
 
     # Affichage de l'objet à deux couches
@@ -580,5 +581,6 @@ if __name__ == "__main__":
     plt.xlabel(r"$x\ (\mu\mathrm{m})$")
     plt.ylabel(r"$y\ (\mu\mathrm{m})$")
     plt.colorbar(label="Intensité")
+    plt.savefig("figures/part5_two_layers.png", dpi=150)
     plt.show()
 
