@@ -393,7 +393,7 @@ class Microscopy:
             ax.set_title(title)
             ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
             fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        plt.savefig("part3_contrast_modes.png", dpi=150)
+        plt.savefig("figures/part3_contrast_modes.png", dpi=150)
         plt.show()
 
     # ================= PART 4 : Échantillonnage du détecteur et bruit (Q6) =================
@@ -470,7 +470,7 @@ class Microscopy:
                 else:
                     ax.set_xlim(xc - half_window_um, xc + half_window_um)
                     ax.set_ylim(yc - half_window_um, yc + half_window_um)
-        plt.savefig("part4_camera.png", dpi=150)
+        plt.savefig("figures/part4_camera.png", dpi=150)
         plt.show()
     # ================= PART 5  =================
     def fresnelPropagate(self, field, dz, wavelength=None):
