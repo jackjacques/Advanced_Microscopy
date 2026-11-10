@@ -182,72 +182,33 @@ class Microscopy:
 
     def plotPupils(self, NAs=(0.01, 0.1, 1.0),
                    save_path="figures/part2_pupil_and_cutoffs.png"):
-        """Q2 - Pupilles binaires et coupes 1D pour chaque NA."""
-        fig, axes = plt.subplots(2, len(NAs), figsize=(14, 8), constrained_layout=True)
+        """Q2 - Pupilles binaires pour chaque NA."""
         fx_cpmm = np.fft.fftshift(np.fft.fftfreq(self.N, d=self.dx)) * 1e-3
         extent = [fx_cpmm[0], fx_cpmm[-1], fx_cpmm[0], fx_cpmm[-1]]
-        centre = self.N // 2
-
-        for col, na in enumerate(NAs):
+        fig, axes = plt.subplots(1, len(NAs), figsize=(5 * len(NAs), 4.5), constrained_layout=True)
+        for ax, na in zip(axes, NAs):
             pupil = self.computePupil(na, self.lambda_ref, self.L, self.N)
-            fc_cpmm = (na / self.lambda_ref) * 1e-3
-
-            # Ligne 1 : pupille 2D
-            im = axes[0, col].imshow(
-                pupil, cmap="gray", extent=extent, origin="lower", vmin=0, vmax=1
-            )
-            axes[0, col].set_title(f"2D pupil (NA = {na})\n$f_c = {fc_cpmm:.1f}$ cycles/mm")
-            axes[0, col].set_xlabel(r"$f_x\ (\mathrm{cycles/mm})$")
-            axes[0, col].set_ylabel(r"$f_y\ (\mathrm{cycles/mm})$")
-            fig.colorbar(im, ax=axes[0, col], fraction=0.046, pad=0.04)
-
-            # Ligne 2 : coupe 1D
-            axes[1, col].plot(fx_cpmm, pupil[centre, :], color="crimson", lw=2, label="Pupil")
-            axes[1, col].axvline(fc_cpmm, color="black", linestyle="--", alpha=0.7,
-                                 label=f"$\\pm f_c$ ({fc_cpmm:.0f})")
-            axes[1, col].axvline(-fc_cpmm, color="black", linestyle="--", alpha=0.7)
-            axes[1, col].set_title(f"1D cut ($f_y = 0$), NA = {na}")
-            axes[1, col].set_xlabel(r"$f_x\ (\mathrm{cycles/mm})$")
-            axes[1, col].set_ylabel("Transmission")
-            axes[1, col].set_ylim(-0.05, 1.1)
-            axes[1, col].grid(True, linestyle=":", alpha=0.6)
-            axes[1, col].legend(loc="upper right", fontsize=8)
-
+            ax.imshow(pupil, cmap="gray", extent=extent, origin="lower")
+            ax.set_title(f"Pupil, NA = {na}")
+            ax.set_xlabel(r"$f_x$ (cycles/mm)")
+            ax.set_ylabel(r"$f_y$ (cycles/mm)")
         if save_path:
             plt.savefig(save_path, dpi=150)
         plt.show()
 
-    def compareNAs(self, NAs=(0.01, 0.1, 1.0), zoom_half_um=60,
-                   save_path="figures/part2_cells_vs_NA.png"):
-        """Q3 - Image de l'objet pour plusieurs NA (champ complet + zoom sur un noyau)."""
+    def compareNAs(self, NAs=(0.01, 0.1, 1.0), save_path="figures/part2_cells_vs_NA.png"):
+        """Q3 - Image de l'objet pour plusieurs NA."""
         fov_um = self.L * 1e6
         extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
-
-        # Zoom centré sur le noyau le plus absorbant
-        xc, yc = (c * 1e6 for c in self.nucleusCentre())
-
-        fig, axes = plt.subplots(2, len(NAs), figsize=(5 * len(NAs), 9),
-                                 constrained_layout=True)
-        for col, na in enumerate(NAs):
-            image = self.applyPupilImaging(na)
-            r_rayleigh = 0.61 * self.lambda_ref / na * 1e6
-            for row in range(2):
-                ax = axes[row, col]
-                im = ax.imshow(image, cmap="gray", extent=extent, origin="lower")
-                ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
-                ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
-                if row == 0:
-                    ax.set_title(f"NA = {na}  (Rayleigh: {r_rayleigh:.2f} µm)")
-                else:
-                    ax.set_xlim(xc - zoom_half_um, xc + zoom_half_um)
-                    ax.set_ylim(yc - zoom_half_um, yc + zoom_half_um)
-                    ax.set_title(f"Zoom on a nucleus (NA = {na})")
-                fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04).set_label("Intensity")
-
+        fig, axes = plt.subplots(1, len(NAs), figsize=(5 * len(NAs), 4.5), constrained_layout=True)
+        for ax, na in zip(axes, NAs):
+            ax.imshow(self.applyPupilImaging(na), cmap="gray", extent=extent, origin="lower")
+            ax.set_title(f"NA = {na}")
+            ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
+            ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
         if save_path:
             plt.savefig(save_path, dpi=150)
         plt.show()
-
 
     def plot_obj(self, figsize=(11, 4.5), save_path="figures/part1_Intensity_and_Phase_maps.png"):
         fov_um = self.L * 1e6
@@ -337,66 +298,47 @@ class Microscopy:
     def resolution(self, NAs=(0.01, 0.1, 1.0), groups=range(4, 10), threshold=0.15,
                    save_path="figures/part2_Resolution_calibration_USAF1951.png"):
         """
-        Q3.3 - Mesure de la résolution avec une mire USAF 1951 synthétique.
-        Pour chaque NA : contraste de chaque élément, puis élément le plus fin
-        tel que lui et tous les éléments plus grossiers dépassent `threshold`
-        (~ critère de Rayleigh : creux de 26 % -> C ~ 0.15).
-        Théorie (imagerie cohérente) : fréquence de coupure f_c = NA / lambda.
+        Q3.3 - Mire USAF 1951 à l'échelle réelle, imagée pour chaque NA.
+        Pour chaque NA, on affiche le plus petit élément encore résolu
+        (contraste entre barres et interstices >= threshold).
+        Ligne 1 : mire entière. Ligne 2 : zoom sur les petits groupes (6 à 9).
         """
         target, elements = self.makeUSAFTarget(groups)
-        lp = np.array([el["lp_mm"] for el in elements])
         E_fft = np.fft.fftshift(np.fft.fft2(target.astype(complex)))
-
         fov_um = self.L * 1e6
         extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
-        nyquist_lp = 1e-3 / (2 * self.dx)
 
-        fig = plt.figure(figsize=(5 * (len(NAs) + 1), 10), constrained_layout=True)
-        gs = fig.add_gridspec(2, len(NAs) + 1)
-        ax_t = fig.add_subplot(gs[0, 0])
-        ax_t.imshow(target, cmap="gray", extent=extent, origin="lower", vmin=0, vmax=1)
-        ax_t.set_title(f"Synthetic USAF 1951 target\n(groups {groups[0]}–{groups[-1]})")
-        ax_t.set_xlabel(r"$x\ (\mu\mathrm{m})$")
-        ax_t.set_ylabel(r"$y\ (\mu\mathrm{m})$")
-        ax_c = fig.add_subplot(gs[1, :])
+        # Zone des petits groupes pour le zoom
+        small = [el for el in elements if el["group"] >= 6]
+        zx = (min(el["x0"] for el in small), max(el["x0"] + 5 * el["w"] for el in small))
+        zy = (min(el["y0"] for el in small), max(el["y0"] + 5 * el["w"] for el in small))
 
+        images = [(target, "USAF 1951 target")]
         print("=== USAF 1951 RESOLUTION ===")
-        for col, na in enumerate(NAs, start=1):
+        for na in NAs:
             pupil = self.computePupil(na, self.lambda_ref, self.L, self.N)
             img = np.abs(np.fft.ifft2(np.fft.ifftshift(E_fft * pupil))) ** 2
             C = np.array([self.elementContrast(img, el) for el in elements])
-
             failed = np.flatnonzero(C < threshold)
             last = (failed[0] if failed.size else len(elements)) - 1
-            fc_lp = na / self.lambda_ref * 1e-3
+            el = elements[max(last, 0)]
+            print(f"NA = {na}: smallest resolved element = group {el['group']} element "
+                  f"{el['element']} ({el['lp_mm']:.0f} lp/mm, line width {el['w']*1e6:.2f} µm)")
+            images.append((img, f"NA = {na}"))
 
-            if last >= 0:
-                el = elements[last]
-                res_txt = (f"G{el['group']} E{el['element']}: {el['lp_mm']:.0f} lp/mm "
-                           f"(line width {el['w']*1e6:.2f} µm)")
-            else:
-                res_txt = f"coarser than G{groups[0]} E1"
-            if last == len(elements) - 1:
-                res_txt += " = finest element of the target"
-            print(f"NA = {na}: f_c = {fc_lp:.0f} lp/mm (period {1e3/fc_lp:.2f} µm) "
-                  f"-> resolved up to {res_txt}")
-
-            ax = fig.add_subplot(gs[0, col])
-            ax.imshow(img, cmap="gray", extent=extent, origin="lower")
-            ax.set_title(f"NA = {na}\nresolved: {res_txt.split(' (')[0]}")
-            ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
-
-            line, = ax_c.semilogx(lp, C, "o-", ms=3, label=f"NA = {na}")
-            ax_c.axvline(fc_lp, color=line.get_color(), ls="--", alpha=0.7)
-
-        ax_c.axhline(threshold, color="black", ls=":", label=f"threshold C = {threshold}")
-        ax_c.axvline(nyquist_lp, color="gray", ls="-.", label=f"grid Nyquist ({nyquist_lp:.0f} lp/mm)")
-        ax_c.set_xlabel("Spatial frequency of the element (lp/mm)")
-        ax_c.set_ylabel("Michelson contrast C")
-        ax_c.set_title(r"Contrast per USAF element (dashed: coherent cutoff $f_c = NA/\lambda$)")
-        ax_c.grid(True, which="both", ls=":", alpha=0.5)
-        ax_c.legend()
-
+        fig, axes = plt.subplots(2, len(images), figsize=(4.5 * len(images), 7),
+                                 constrained_layout=True)
+        for col, (img, title) in enumerate(images):
+            for row in range(2):
+                ax = axes[row, col]
+                ax.imshow(img, cmap="gray", extent=extent, origin="lower")
+                ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
+                if row == 0:
+                    ax.set_title(title)
+                else:
+                    ax.set_xlim(zx[0] * 1e6 - 5, zx[1] * 1e6 + 5)
+                    ax.set_ylim(zy[0] * 1e6 - 5, zy[1] * 1e6 + 5)
+                    ax.set_title(f"Zoom on groups 6-9")
         if save_path:
             plt.savefig(save_path, dpi=150)
         plt.show()
@@ -438,64 +380,25 @@ class Microscopy:
                       save_path="figures/part3_contrast_modes.png"):
         """
         Q4 + Q5 : brightfield, darkfield et contraste de phase.
-        Ligne 1 : objet réel (phase jusqu'à ~30 rad).
-        Ligne 2 : objet faible (phase réduite à phi_max_weak) + profil 1D.
-        Le champ est toujours simulé exactement (exp(i*phi)) ; la linéarisation
-        1 + i*phi ne sert qu'à l'interprétation théorique.
+        Le contraste de phase suppose un objet de phase faible : on réduit la phase
+        de l'objet à phi_max_weak (nos cellules atteignent ~30 rad).
         """
-        P = self.computePupil(NA, self.lambda_ref, self.L, self.N)
-        P_dark = self.darkfieldPupil(NA_in, NA)
-        P_phc = self.phaseContrastPupil(NA)
-
-        # Ligne 1 : objet réel
-        bright = self.imageWithPupil(P)
-        dark = self.imageWithPupil(P_dark)
-        phc = self.imageWithPupil(P_phc)
-
-        # Ligne 2 : objet faible (phi << 1), champ exact
+        bright = self.imageWithPupil(self.computePupil(NA, self.lambda_ref, self.L, self.N))
+        dark = self.imageWithPupil(self.darkfieldPupil(NA_in, NA))
         phi_weak = self.phase_map / self.phase_map.max() * phi_max_weak
         field_weak = np.sqrt(self.intensity_map) * np.exp(1j * phi_weak)
-        bright_weak = self.imageWithPupil(P, field_weak)
-        phc_weak = self.imageWithPupil(P_phc, field_weak)
-
+        phc = self.imageWithPupil(self.phaseContrastPupil(NA), field_weak)
         fov_um = self.L * 1e6
         extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
-
-        fig, axes = plt.subplots(2, 3, figsize=(16, 10), constrained_layout=True)
-        panels = [
-            (axes[0, 0], bright, f"Brightfield, real object (NA = {NA})"),
-            (axes[0, 1], dark, f"Darkfield, real object ({NA_in} < NA ≤ {NA})"),
-            (axes[0, 2], phc, f"Phase contrast, real object (NA = {NA})"),
-            (axes[1, 0], bright_weak,
-             rf"Brightfield, weak object ($\varphi_{{max}}$ = {phi_max_weak} rad)"),
-            (axes[1, 1], phc_weak,
-             rf"Phase contrast, weak object ($\varphi_{{max}}$ = {phi_max_weak} rad)"),
-        ]
-        for ax, img, title in panels:
-            im = ax.imshow(img, cmap="gray", extent=extent, origin="lower")
+        panels = [(bright, f"Brightfield (NA = {NA})"),
+                  (dark, f"Darkfield ({NA_in} < NA < {NA})"),
+                  (phc, f"Phase contrast (phase reduced to {phi_max_weak} rad)")]
+        fig, axes = plt.subplots(1, 3, figsize=(16, 4.8), constrained_layout=True)
+        for ax, (img, title) in zip(axes, panels):
+            ax.imshow(img, cmap="gray", extent=extent, origin="lower")
             ax.set_title(title)
             ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
             ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
-            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04).set_label("Intensity")
-
-        # Profil 1D à travers la cellule de phase maximale
-        iy, ix = np.unravel_index(np.argmax(self.phase_map), self.phase_map.shape)
-        x_um = self.X[iy, :] * 1e6
-        half = 1.5 * self.cell_radius_mean * 1e6
-        sel = np.abs(x_um - x_um[ix]) <= half
-        for ax in (axes[1, 0], axes[1, 1]):
-            ax.axhline(self.Y[iy, 0] * 1e6, color="crimson", lw=0.8, ls="--")
-        ax_p = axes[1, 2]
-        ax_p.plot(x_um[sel], bright_weak[iy, sel], label="Brightfield")
-        ax_p.plot(x_um[sel], phc_weak[iy, sel], label="Phase contrast")
-        ax_p.plot(x_um[sel], (1 + phi_weak[iy, sel]) ** 2, "k--", lw=1,
-                  label=r"Theory $(1+\varphi)^2$")
-        ax_p.set_title("Weak object: profile along the dashed line")
-        ax_p.set_xlabel(r"$x\ (\mu\mathrm{m})$")
-        ax_p.set_ylabel("Intensity")
-        ax_p.grid(True, ls=":", alpha=0.6)
-        ax_p.legend()
-
         if save_path:
             plt.savefig(save_path, dpi=150)
         plt.show()
@@ -551,85 +454,32 @@ class Microscopy:
                          magnification=1.0, half_window_um=30,
                          save_path="figures/part4_camera.png"):
         """Q6 - Même objet, deux caméras : (pixel 1 µm, SNR 30) vs (pixel 3.5 µm, SNR 60).
-        Ligne 1 : champ complet. Ligne 2 : zoom sur un noyau.
-        Ligne 3 : profil horizontal à travers le noyau.
-        Affiche aussi le CNR du noyau : (I_fond - I_noyau) / sigma_fond."""
+        Ligne 1 : champ complet. Ligne 2 : zoom sur un noyau."""
         ideal = self.applyPupilImaging(NA)
         ideal = ideal / np.median(ideal)  # fond = 1
-
-        # Noyau le plus absorbant : centre du zoom et ligne du profil
-        xc, yc = self.nucleusCentre()
-
-        # Masques "cellule" et "ce noyau" sur la grille fine (pour le CNR)
-        cell_mask = (self.phase_map > 0).astype(float)
-        near = (self.X - xc) ** 2 + (self.Y - yc) ** 2 < (half_window_um * 1e-6 / 2) ** 2
-        nuc_mask = ((self.intensity_map < 1) & near).astype(float)
-
-        nyquist_um = self.lambda_ref / (4 * NA) * 1e6
-        nuc_diam_um = 2 * self.nucleus_radius_frac * self.cell_radius_mean * 1e6
-        print(f"=== CAMERAS (NA = {NA}, M = {magnification}) ===")
-        print(f"Nyquist for this NA: object pixel <= lambda/(4NA) = {nyquist_um:.2f} µm")
-
-        entries = [(ideal, self.dx, f"Ideal image\n(dx = {self.dx*1e6:.2f} µm, no noise)")]
+        images = [(ideal, "Ideal image (no camera)")]
         for pitch, snr in cameras:
-            p_obj = pitch / magnification
-            img = self.addCameraEffects(ideal, pitch, snr, magnification, seed=0)
+            images.append((self.addCameraEffects(ideal, pitch, snr, magnification, seed=0),
+                           f"Pixel {pitch*1e6:.1f} µm, SNR = {snr}"))
 
-            # CNR du noyau : pixels hors cellules = fond, pixels couverts à >50 % = noyau
-            bg = self.resampleToCamera(cell_mask, p_obj) == 0
-            nuc_cov = self.resampleToCamera(nuc_mask, p_obj)
-            nuc = nuc_cov > 0.5
-            if not nuc.any():
-                nuc = nuc_cov == nuc_cov.max()
-            I_bg, sigma_bg = img[bg].mean(), img[bg].std()
-            cnr = (I_bg - img[nuc].mean()) / sigma_bg
-            print(f"Pixel {pitch*1e6:.1f} µm, SNR {snr}: object pixel = {p_obj*1e6:.2f} µm, "
-                  f"{snr**2} photons on background, nucleus ~ {nuc_diam_um/(p_obj*1e6):.1f} px wide, "
-                  f"background noise = {sigma_bg*100:.1f} %, nucleus CNR per pixel = {cnr:.1f} "
-                  f"({nuc.sum()} px), CNR x sqrt(n_px) = {cnr*np.sqrt(nuc.sum()):.1f}")
-            entries.append((img, p_obj, f"Pixel {pitch*1e6:.1f} µm, SNR = {snr}\n"
-                                         f"nucleus CNR/pixel = {cnr:.1f}"))
-
+        xc, yc = (c * 1e6 for c in self.nucleusCentre())
         fov_um = self.L * 1e6
         extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
-        vmin, vmax = 0.75, 1.25
-
-        fig = plt.figure(figsize=(5 * len(entries), 13), constrained_layout=True)
-        gs = fig.add_gridspec(3, len(entries), height_ratios=[1, 1, 0.7])
-        ax_p = fig.add_subplot(gs[2, :])
-        for col, (img, p_obj, title) in enumerate(entries):
+        fig, axes = plt.subplots(2, len(images), figsize=(5 * len(images), 9),
+                                 constrained_layout=True)
+        for col, (img, title) in enumerate(images):
             for row in range(2):
-                ax = fig.add_subplot(gs[row, col])
-                im = ax.imshow(img, cmap="gray", extent=extent, origin="lower",
-                               interpolation="nearest", vmin=vmin, vmax=vmax)
+                ax = axes[row, col]
+                ax.imshow(img, cmap="gray", extent=extent, origin="lower",
+                          interpolation="nearest", vmin=0.75, vmax=1.25)
                 ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
                 ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
                 if row == 0:
                     ax.set_title(title)
                 else:
-                    ax.set_xlim((xc * 1e6) - half_window_um, (xc * 1e6) + half_window_um)
-                    ax.set_ylim((yc * 1e6) - half_window_um, (yc * 1e6) + half_window_um)
-                    ax.axhline(yc * 1e6, color="crimson", lw=0.8, ls="--")
+                    ax.set_xlim(xc - half_window_um, xc + half_window_um)
+                    ax.set_ylim(yc - half_window_um, yc + half_window_um)
                     ax.set_title("Zoom on a nucleus")
-                fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04).set_label(
-                    "Intensity / background")
-
-            # Profil horizontal à travers le noyau (ligne de pixels contenant yc)
-            n = img.shape[0]
-            centres = (np.arange(n) + 0.5) * self.L / n - self.L / 2
-            row_idx = int(np.clip(np.floor((yc + self.L / 2) / (self.L / n)), 0, n - 1))
-            sel = np.abs(centres - xc) <= half_window_um * 1e-6
-            label = title.split("\n")[0]
-            if col == 0:
-                ax_p.plot(centres[sel] * 1e6, img[row_idx, sel], "k-", lw=1, label=label)
-            else:
-                ax_p.step(centres[sel] * 1e6, img[row_idx, sel], where="mid", label=label)
-        ax_p.set_title("Horizontal profile through the nucleus (dashed line)")
-        ax_p.set_xlabel(r"$x\ (\mu\mathrm{m})$")
-        ax_p.set_ylabel("Intensity / background")
-        ax_p.grid(True, ls=":", alpha=0.6)
-        ax_p.legend()
-
         if save_path:
             plt.savefig(save_path, dpi=150)
         plt.show()
@@ -682,59 +532,37 @@ class Microscopy:
         focus_layer1 = self.imageWithPupil(pupil, self.fresnelPropagate(E, -dz))
         return focus_layer1, focus_layer2
 
-    def _plotZoomGrid(self, columns, zooms, save_path, half_um=70):
-        """Grille : ligne 1 = champ complet, lignes suivantes = zooms (centre, titre)."""
+    def _plotSideBySide(self, panels, save_path):
+        """Images côte à côte, même échelle de gris."""
         fov_um = self.L * 1e6
         extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
-        vmax = max(np.percentile(img, 99.9) for img, _ in columns)
-
-        fig, axes = plt.subplots(1 + len(zooms), len(columns),
-                                 figsize=(7.5 * len(columns), 5.8 * (1 + len(zooms))),
-                                 constrained_layout=True, squeeze=False)
-        for col, (img, title) in enumerate(columns):
-            for row in range(1 + len(zooms)):
-                ax = axes[row, col]
-                im = ax.imshow(img, cmap="gray", extent=extent, origin="lower",
-                               vmin=0, vmax=vmax)
-                ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
-                ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
-                if row == 0:
-                    ax.set_title(title)
-                else:
-                    (xc, yc), ztitle = zooms[row - 1]
-                    ax.set_xlim(xc * 1e6 - half_um, xc * 1e6 + half_um)
-                    ax.set_ylim(yc * 1e6 - half_um, yc * 1e6 + half_um)
-                    ax.set_title(ztitle)
-                fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04).set_label("Intensity")
+        vmax = max(np.percentile(img, 99.9) for img, _ in panels)
+        fig, axes = plt.subplots(1, len(panels), figsize=(6 * len(panels), 5),
+                                 constrained_layout=True)
+        for ax, (img, title) in zip(axes, panels):
+            ax.imshow(img, cmap="gray", extent=extent, origin="lower", vmin=0, vmax=vmax)
+            ax.set_title(title)
+            ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
+            ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
         if save_path:
             plt.savefig(save_path, dpi=150)
         plt.show()
 
     def defocusComparison(self, dz=20e-6, NA=0.5, save_path="figures/part5_defocus.png"):
-        """Q7 - Objet au point vs défocalisé de dz (brightfield)."""
+        """Q7 - Objet au point vs défocalisé de dz."""
         pupil = self.computePupil(NA, self.lambda_ref, self.L, self.N)
         field = self.get_complex_field()
         in_focus = self.imageWithPupil(pupil, field)
         defocused = self.imageWithPupil(pupil, self.fresnelPropagate(field, dz))
-        dof_um = self.lambda_ref / NA**2 * 1e6
-        print(f"=== DEFOCUS: dz = {dz*1e6:.0f} µm, NA = {NA}, "
-              f"depth of field ~ lambda/NA^2 = {dof_um:.1f} µm ===")
-        self._plotZoomGrid(
-            [(in_focus, f"In focus (NA = {NA})"),
-             (defocused, f"Defocused by dz = {dz*1e6:.0f} µm (DOF ≈ {dof_um:.1f} µm)")],
-            [(self.nucleusCentre(), "Zoom on a cell")],
-            save_path)
+        self._plotSideBySide([(in_focus, f"In focus (NA = {NA})"),
+                              (defocused, f"Defocused by {dz*1e6:.0f} µm")], save_path)
 
     def twoLayerComparison(self, dz=20e-6, NA=0.5, save_path="figures/part5_two_layers.png"):
         """Q8 - Objet à deux couches : mise au point sur la couche 1 puis sur la couche 2."""
         focus1, focus2 = self.simulate_two_layer(dz, NA)
-        _, intensity2 = self.getLayer2()
-        self._plotZoomGrid(
-            [(focus1, f"Focus on layer 1 (z = 0), NA = {NA}"),
-             (focus2, f"Focus on layer 2 (z = {dz*1e6:.0f} µm), NA = {NA}")],
-            [(self.nucleusCentre(), "Zoom on a layer-1 cell"),
-             (self.nucleusCentre(intensity_map=intensity2), "Zoom on a layer-2 cell")],
-            save_path)
+        self._plotSideBySide([(focus1, "Focus on layer 1"),
+                              (focus2, f"Focus on layer 2 ({dz*1e6:.0f} µm further)")],
+                             save_path)
 
 
     # ================= PART 6: Complete microscope (Q9, Q10, Q11) =================
@@ -788,60 +616,38 @@ class Microscopy:
         extent = [x0, x0 + cols * p * 1e6, y0, y0 + rows * p * 1e6]
         return cam, extent
 
-    def finalMicroscope(self, objective=OBJECTIVE, camera=CAMERA, NA_in=0.05,
+    def finalMicroscope(self, objective=OBJECTIVE, camera=CAMERA,
                         save_path="figures/part6_final_image.png"):
-        """Q10 - Microscope réaliste (composants OBJECTIVE / CAMERA) sur l'objet
-        synthétique, en brightfield, darkfield et contraste de phase."""
+        """Q10 - Image finale avec les composants choisis (brightfield)."""
         M, NA = objective["magnification"], objective["NA"]
-        p_obj = camera["pixel_pitch"] / M
-        fov = (camera["n_cols"] * p_obj * 1e6, camera["n_rows"] * p_obj * 1e6)
-        print(f"=== FINAL MICROSCOPE ===\nObjective: {objective['name']}\n"
-              f"Camera: {camera['name']}")
-        print(f"Object pixel = {p_obj*1e6:.3f} µm (Nyquist lambda/(4NA) = "
-              f"{self.lambda_ref/(4*NA)*1e6:.2f} µm), Rayleigh = "
-              f"{0.61*self.lambda_ref/NA*1e6:.2f} µm, field of view = "
-              f"{fov[0]:.0f} x {fov[1]:.0f} µm, DOF ~ {self.lambda_ref/NA**2*1e6:.1f} µm")
-
-        # Centre du capteur sur le barycentre des cellules
         cells = self.phase_map > 0
-        centre = (self.X[cells].mean(), self.Y[cells].mean()) if cells.any() else (0, 0)
-
-        modes = [("brightfield", "Brightfield"), ("darkfield", f"Darkfield (NA_in = {NA_in})"),
-                 ("phase", "Phase contrast")]
-        fig, axes = plt.subplots(1, 3, figsize=(21, 5.5), constrained_layout=True)
-        for ax, (mode, label) in zip(axes, modes):
-            img, extent = self.assembleMicroscope(
-                NA, pixel_pitch=camera["pixel_pitch"], magnification=M, snr=camera["snr"],
-                seed=0, mode=mode, NA_in=NA_in,
-                sensor_shape=(camera["n_rows"], camera["n_cols"]), centre=centre)
-            im = ax.imshow(img, cmap="gray", extent=extent, origin="lower",
-                           interpolation="nearest")
-            ax.set_title(f"{label}\n{M:.0f}X / NA {NA}, pixel {camera['pixel_pitch']*1e6:.2f} µm, "
-                         f"SNR {camera['snr']}")
-            ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
-            ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
-            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04).set_label(
-                "Intensity / peak" if mode == "darkfield" else "Intensity / background")
+        centre = (self.X[cells].mean(), self.Y[cells].mean())
+        img, extent = self.assembleMicroscope(
+            NA, pixel_pitch=camera["pixel_pitch"], magnification=M, snr=camera["snr"], seed=0,
+            sensor_shape=(camera["n_rows"], camera["n_cols"]), centre=centre)
+        fig, ax = plt.subplots(figsize=(7.5, 5.5), constrained_layout=True)
+        ax.imshow(img, cmap="gray", extent=extent, origin="lower", interpolation="nearest")
+        ax.set_title(f"{M:.0f}X / NA {NA}, pixel {camera['pixel_pitch']*1e6:.2f} µm, "
+                     f"SNR = {camera['snr']}")
+        ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
+        ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
         if save_path:
             plt.savefig(save_path, dpi=150)
         plt.show()
 
     def realCellsComparison(self, image_path="Red Blood Cells DIC 8um.jpg",
-                            cell_diameter=8e-6, cell_diameter_px=70, phi_max=1.0,
+                            cell_diameter=8e-6, cell_diameter_px=70,
                             objective=OBJECTIVE, camera=CAMERA,
                             save_path="figures/part6_real_cells.png"):
         """
         Q11 - Image réelle de globules rouges à travers le microscope.
-        Échelle : un globule rouge mesure cell_diameter (8 µm) et ~cell_diameter_px
-        pixels sur la photo -> taille du pixel de la photo. La photo est placée à
-        cette échelle sur une grille dédiée (pas d'étirement), complétée par le
-        niveau de fond, et retournée verticalement (ligne 0 = bas, comme la grille).
-        Deux interprétations : photo = transmission en amplitude, ou = carte de phase.
+        Échelle : un globule rouge (8 µm) fait ~70 pixels sur la photo.
+        La photo est utilisée comme transmission en amplitude.
         """
         raw = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
         if raw is None:
             raise FileNotFoundError(f"Cannot load '{image_path}'.")
-        img = np.flipud(raw.astype(float))
+        img = np.flipud(raw.astype(float))  # ligne 0 = bas, comme la grille
         bg = np.median(img)
 
         px = cell_diameter / cell_diameter_px
@@ -851,37 +657,23 @@ class Microscopy:
         r0, c0 = (N - img.shape[0]) // 2, (N - img.shape[1]) // 2
         canvas[r0:r0 + img.shape[0], c0:c0 + img.shape[1]] = img
 
-        amp_field = np.sqrt(canvas / bg).astype(complex)       # fond = 1
-        norm = (canvas - canvas.min()) / (canvas.max() - canvas.min())
-        phase_field = np.exp(1j * phi_max * norm)
-
         M, NA = objective["magnification"], objective["NA"]
-        kw = dict(pixel_pitch=camera["pixel_pitch"], magnification=M, snr=camera["snr"],
-                  seed=0, sensor_shape=(camera["n_rows"], camera["n_cols"]))
-        sim_amp, extent = grid.assembleMicroscope(NA, field=amp_field, **kw)
-        sim_phase, _ = grid.assembleMicroscope(NA, field=phase_field, mode="phase", **kw)
+        sim, extent = grid.assembleMicroscope(
+            NA, field=np.sqrt(canvas / bg).astype(complex), pixel_pitch=camera["pixel_pitch"],
+            magnification=M, snr=camera["snr"], seed=0,
+            sensor_shape=(camera["n_rows"], camera["n_cols"]))
 
         w, h = img.shape[1] * px * 1e6, img.shape[0] * px * 1e6
-        print(f"=== REAL CELLS: photo pixel = {px*1e9:.0f} nm, photo field = "
-              f"{w:.0f} x {h:.0f} µm, object pixel of the camera = "
-              f"{camera['pixel_pitch']/M*1e6:.3f} µm ===")
-
-        fig, axes = plt.subplots(1, 3, figsize=(21, 5.5), constrained_layout=True)
-        panels = [
-            (canvas, [-N * px * 5e5, N * px * 5e5] * 2, "Original DIC photo (to scale)"),
-            (sim_amp, extent, f"Simulated: photo as amplitude, brightfield\n"
-                              f"{M:.0f}X / NA {NA}, pixel {camera['pixel_pitch']*1e6:.2f} µm"),
-            (sim_phase, extent, f"Simulated: photo as phase (max {phi_max} rad), "
-                                f"phase contrast\n{M:.0f}X / NA {NA}"),
-        ]
-        for ax, (im_, ext, title) in zip(axes, panels):
-            im = ax.imshow(im_, cmap="gray", extent=ext, origin="lower", interpolation="nearest")
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
+        for ax, (im_, ext, title) in zip(axes, [
+                (canvas, [-N * px * 5e5, N * px * 5e5] * 2, "Original image"),
+                (sim, extent, f"Through our microscope ({M:.0f}X / NA {NA})")]):
+            ax.imshow(im_, cmap="gray", extent=ext, origin="lower", interpolation="nearest")
             ax.set_xlim(-w / 2, w / 2)
             ax.set_ylim(-h / 2, h / 2)
             ax.set_title(title)
             ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
             ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
-            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         if save_path:
             plt.savefig(save_path, dpi=150)
         plt.show()
@@ -891,7 +683,7 @@ if __name__ == "__main__":
 
     np.random.seed(0)
     #  Cell sample
-    sample = Microscopy(n_cells=8)
+    sample = Microscopy(n_cells=10)
 
     # Maps
     sample.plot_obj()

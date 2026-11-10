@@ -1,240 +1,238 @@
-\documentclass[12pt]{article}
+\documentclass[11pt]{article}
 
+\usepackage[margin=2.2cm]{geometry}
 \usepackage{float}
 \usepackage{amsmath}
 \usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{positioning, arrows.meta}
 
-
-\author{Group}
-\title{Lab report - Microscopy Imaging - How to build a virtual microscope}
+\author{Laura Ehrentrant \and Hugo Trebert \and Jacques Angleys}
+\title{Lab report -- Microscopy Imaging\\How to build a virtual microscope}
 \date{\today}
-
 
 \begin{document}
 
 \maketitle
 
-\section{Part 1 - Defining the Object}
-\subsection{Q1}
-\begin{figure}[htbp]
+\section*{Introduction}
+
+The goal of this lab is to simulate the formation of an image in an optical microscope, step by step: the object, the objective, the contrast techniques, the camera and the defocus. We used Python (NumPy, Matplotlib, OpenCV) instead of MATLAB, with the same functions (\texttt{fft2}, \texttt{fftshift}, \texttt{ifft2}). All simulations use $\lambda = 550$ nm and a grid of $4096 \times 4096$ pixels over a 1 mm field of view (pixel of $0.24\,\mu$m). We first used a coarser grid, but then the pupils for large NA did not fit in the grid.
+
+\section{Part 0 -- Overview of the pipeline}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners, align=center, minimum height=1cm, text width=2.7cm, font=\footnotesize},
+  arr/.style={-{Stealth}, thick},
+  node distance=0.4cm]
+  \node[box] (obj) {Object\\ \texttt{makeObject}};
+  \node[box, right=of obj] (prop) {Defocus\\ \texttt{fresnelPropagate}};
+  \node[box, right=of prop] (pup) {Objective (pupil)\\ \texttt{computePupil}};
+  \node[box, right=of pup] (det) {Intensity $|E|^2$};
+  \node[box, right=of det] (cam) {Camera\\ \texttt{addCameraEffects}};
+  \draw[arr] (obj) -- (prop);
+  \draw[arr] (prop) -- (pup);
+  \draw[arr] (pup) -- (det);
+  \draw[arr] (det) -- (cam);
+\end{tikzpicture}
+\caption{Imaging pipeline. \texttt{assembleMicroscope} chains all these steps.}
+\label{fig:pipeline}
+\end{figure}
+
+The sample is described by a complex field (amplitude and phase). The objective is modeled as a filter in the Fourier plane (the pupil). The camera only measures the intensity, with a finite pixel size and some noise.
+
+\section{Part 1 -- Defining the Object}
+
+\paragraph{Q1} We wrote \texttt{makeObject} following the template given by the professor, with the parameters of the lab (10 cells of radius $50 \pm 10\,\mu$m, nucleus radius $= 0.1 \times$ cell radius, $\Delta n = 0.02$). Each cell is a sphere: its thickness gives the phase map. The nucleus absorbs a little light (amplitude 0.95), which gives the intensity map.
+
+\begin{figure}[H]
   \centering
-  \includegraphics[width= 0.8\textwidth]{figures/part1_Intensity_and_Phase_maps.png}
-  \caption{Synthetic object maps showing the transmitted intensity $I(x, y)$ and the accumulated phase delay $\Delta\phi(x, y)$ across a $1.2\text{ mm} \times 1.2\text{ mm}$ field of view.}
+  \includegraphics[width=0.8\textwidth]{figures/part1_Intensity_and_Phase_maps.png}
+  \caption{Intensity map (left) and phase map (right) of the object.}
   \label{fig:part1_object}
 \end{figure}
 
-
 \paragraph{Q1.1} \textit{What would the image of such an object look like on a traditional widefield microscope? What is the minimum numerical aperture that should allow you to resolve the nuclei?}
 
-The image object is on an actual widefild microscope, a bunch of cells that have a certain thikness and absorb a certain amount of light.
-The image is then genuinely a phase object:
+The cells are almost transparent: they mostly change the phase of the light, and a camera only sees the intensity. So in a widefield microscope the image would be almost uniform, with only the nuclei appearing as small, slightly dark spots.
+
+The nucleus has a diameter $D = 2 \times 0.1 \times 50 = 10\,\mu$m. With the Rayleigh criterion:
+\[
+0.61\,\frac{\lambda}{NA} \le D \quad\Rightarrow\quad NA \ge 0.61 \times \frac{0.55}{10} \approx 0.034
+\]
+So we need at least $NA \approx 0.03$ to resolve the nuclei.
+
+\paragraph{Q1.2} \textit{What kind of technique could be used to retrieve information from a sample that is mostly transparent?}
+
+We need a technique that turns the phase into intensity:
 \begin{itemize}
-  \item $\Delta z = 0$ (focus):
-  A camera or the eye detects only optical intensity $I = \vert{}E\vert{}^2 = 1$. The phase perturbations do not generate amplitude contrast when the object plane is conjugate to the lense (detector).
-  \item $\Delta z \neq 0$ (out of contrast):
-  As a transparent cell does not absorb light, but has a index of refraction that is a little bit higher than the fluid around, it acts as a small convergent lense, with a gradient index. So when the detector moves of $\Delta z$, the phase changes for the electromagnetic wave, and the focus is lost.
+  \item \textbf{darkfield}: the direct light is blocked and only the light deflected by the cells is collected, so the cells appear bright on a black background;
+  \item \textbf{phase contrast} (Zernike): a phase plate shifts the direct light so that the phase differences become intensity differences;
+  \item \textbf{DIC} (differential interference contrast), or simply a slight defocus.
 \end{itemize}
 
+\section{Part 2 -- Resolution and the Pupil Function}
 
-For the numerical apperture:
-$$R_{\text{nuc}} = 50\,\mu\text{m} \times 0.10 = 5\,\mu\text{m}$$
-$$\Leftrightarrow$$
-$$D_{\text{nuc}} = 2 \times R_{\text{nuc}} = 10\,\mu\text{m}$$
-$$\lambda=550 \mu m$$
-We need to compute the diffraction limits.
-To resolve the object of a diameter of $D_{nuc}$, we must use two differents metrics:
-\begin {itemize}
-    \item Abbe Resolution Limit:$$d_{\text{min}} = \frac{\lambda}{2 \cdot NA} \le D_{\text{nuc}} \implies NA \ge \frac{\lambda}{2 D_{\text{nuc}}}$$ $$\Leftrightarrow$$ $$NA \ge \frac{0.55\,\mu\text{m}}{2 \times 10\,\mu\text{m}} = \mathbf{0.0275}$$
-    \item Rayleigh Criterion:$$r_{\text{Rayleigh}} = 0.61 \frac{\lambda}{NA} \le D_{\text{nuc}} \implies NA \ge 0.61 \frac{\lambda}{D_{\text{nuc}}}$$ $$\Leftrightarrow$$ $$NA \ge 0.61 \times \frac{0.55\,\mu\text{m}}{10\,\mu\text{m}} \approx \mathbf{0.034}$$
-\end{itemize}
-So, the absolute theoretical lower bound to resolve the nucleus as an individual feature is $NA \approx 0.034$.
+\paragraph{Q2} The objective only collects the light up to an angle given by its NA. In the Fourier plane, this is a disk of radius $f_c = NA/\lambda$: \texttt{computePupil} returns 1 inside this disk and 0 outside.
 
-\paragraph{Q1.2} \textit{What kind of technique could be used to retrieve information from a sample that is mostly transparent?}
-
-There is two electromagnetic waves that goes through the sample: 
-\begin{itemize}
-  \item the direct one, that is not diffracted and has no phase lag;
-  \item The one that goes across the cell and is diffracted by the nucleus ot the borders of the cell.
-\end{itemize}
-Thoses waves are in phase opposition. 
-So a solution could be to set a darkfield: as dust particules lighten by the sun rays in a dark room, we can see very small dust particules that we would never without the darkfield.
-They are only visible because the diffraction of the light.
-This parallel is true in microscopy:
-\begin{itemize}
-  \item We select only a cone of inclined light.
-  \item We assert $NA_{illum} > NA_{obj}$: the angle of the light beam is superior to the objective aperture angle.
-  \item When the light crosses a cell, the borders and organs diffract the light in evry directions.
-\end{itemize}
-Result: the background is dark, the cytoplasma is dark too (does not deflect light beams) but only the border is grey.
-
-\section{Part 2 - Resolution and the Pupil Function}
-
-\paragraph{Q3} \textit{Using fft2, fftshift, ifft2, simulate imaging of the object for NA = 0.01, 0.1, 1.0.
-Compare the resulting images. Are the cells resolved? The nuclei?}
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.85\textwidth]{figures/part2_pupil_and_cutoffs.png}
-  \caption{Pupil masks $P(f_x, f_y)$ and central 1D cross-sections for $NA \in \{0.01, 0.1, 1.0\}$, illustrating the spatial frequency cutoffs $f_c$ acting as low-pass filters.}
+  \caption{Pupils for NA = 0.01, 0.1 and 1.0.}
   \label{fig:part2_pupil}
 \end{figure}
 
-The coherent imaging process through a $4f$ optical telecentric system is simulated by convolving the complex field $E_{\text{in}} = \sqrt{I} e^{i\phi}$ with the objective Point Spread Function (PSF), implemented via the 2D Fourier transform:
-\[
-E_{\text{out}}(x, y) = \mathcal{F}^{-1} \left\{ \mathcal{F}\{E_{\text{in}}\}(f_x, f_y) \cdot P(f_x, f_y) \right\}, \quad I_{\text{det}} = |E_{\text{out}}|^2
-\]
+\paragraph{Q3} \textit{Simulate imaging of the object for NA = 0.01, 0.1, 1.0. Compare the resulting images. Are the cells resolved? The nuclei?}
+
+The field is Fourier transformed (\texttt{fft2}, \texttt{fftshift}), multiplied by the pupil, transformed back (\texttt{ifft2}), and the image is $|E|^2$.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.95\textwidth]{figures/part2_Q33_resolution_computation.png}
-  \caption{Simulated coherent imaging of the synthetic cell sample across three numerical apertures ($NA \in \{0.01, 0.1, 1.0\}$).}
+  \includegraphics[width=0.95\textwidth]{figures/part2_cells_vs_NA.png}
+  \caption{Image of the object for NA = 0.01, 0.1 and 1.0.}
   \label{fig:part2_cells_na}
 \end{figure}
 
-Comparing the three numerical apertures:
 \begin{itemize}
-    \item \textbf{$NA = 0.01$ ($r_{\text{Rayleigh}} = 33.6\,\mu\text{m}$):} Cutoff frequency ($f_c = 18.2\text{ mm}^{-1}$): restrictive. $r_{\text{Rayleigh}} \gg D_{\text{nuc}}$, so the nucleus vanishes into blurry dark stain. Cells overlap creates huges diffraction rings with no distinct boundaries.
-    \item \textbf{$NA = 0.10$ ($r_{\text{Rayleigh}} = 3.35\,\mu\text{m}$):} Since $r_{\text{Rayleigh}} < D_{\text{nuc}} = 10\,\mu\text{m}$, Rayleigh criteria are satisfied, and nuclei are distinctly resolved and cellular boundaries are clearly separable.
-    \item \textbf{$NA = 1.00$ ($r_{\text{Rayleigh}} = 0.34\,\mu\text{m}$):} Diffraction-limited resolution is achieved. Cutoff exceeds main spatial frequencies of the sample ($f_c = 1818\text{ mm}^{-1}$), reproducing cell contours and nuclear geometries with nearly perfect accuracy.
+  \item \textbf{NA = 0.01}: the image is very blurred. The cells appear as dark spots with rings around them and the nuclei are not resolved (resolution $\approx 34\,\mu$m, larger than the nucleus).
+  \item \textbf{NA = 0.1}: the cells are well separated, with a dark edge and rings inside, and the nuclei are visible (resolution $\approx 3.4\,\mu$m).
+  \item \textbf{NA = 1.0}: almost all the light goes through, so the image looks like the real object: the nuclei are sharp but the cells become almost invisible.
 \end{itemize}
+A larger NA gives a better resolution, but it does not make the transparent cells more visible.
 
 \paragraph{Q3.1} \textit{Where is the pupil of the objective physically located?}
 
-The back focal plane is behind the lense (objective). Though, as all the rays comes from the infinity, all parallal rays emmited by the sample ver a certain angle $\theta$ converges to a special point on this back focal plan (BFP). It is a physical apperture that truncate the angles accepted and foxes the maximal apperture angle:  $\theta_{\max} = \arcsin(NA / n)$.
+The pupil is in the back focal plane of the objective. All the rays leaving the sample with the same angle meet at the same point of this plane, so an aperture there limits the angles collected by the objective.
 
-\paragraph{Q3.2} \textit{Intuitively, how come the process of imaging through an optical system involves
-Fourier transforms?}
+\paragraph{Q3.2} \textit{Intuitively, how come the process of imaging through an optical system involves Fourier transforms?}
 
-The light that goes through an object decomposes into a sum of plane waves. The angle of deflection then directly depends on the fine details. Indeed, the object's spatial frequencies are given by: $\sin\theta = \lambda f_x$. The lense focuses each wave $\Sigma_\theta$ into a single point $x_f, y_f$, in the BFP. This plane thus physically realizes a 2D spatial Fourier transform of the incident wave field. 
-The second lens then collects these focal points and refocuses them onto the image plane, which performs the inverse operation (inverse Fourier transform-ifft/ifft2) of the recombined plane waves.
+The light leaving the object can be seen as a sum of plane waves with different angles: the fine details send light at large angles and the large details at small angles. The objective focuses each angle to one point of its back focal plane, so this plane contains the Fourier transform of the object. The second lens recombines these waves on the camera, which is the inverse Fourier transform.
 
-\paragraph{Q3.3} \textit{A target can be used to quantify the resolution of a microscope. Use the different
-targets provided to try and assess the resolution of your system. Explain the method you
-are are using as well as your results.}
+\paragraph{Q3.3} \textit{Use the different targets provided to try and assess the resolution of your system. Explain the method you are using as well as your results.}
 
-To calibrate optical resolution experimentally, a standard negative USAF 1951 resolution target is imaged through the pipeline for each numerical aperture:
+The provided USAF image is small (about $250 \times 250$ pixels) and has no physical size, so its bars were too large to test our microscope. We therefore drew the USAF 1951 target ourselves at its real size (groups 4 to 9, bars from $31\,\mu$m down to $0.55\,\mu$m), imaged it for each NA, and looked for the smallest group of bars that we can still separate.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.95\textwidth]{figures/part2_Resolution_calibration_USAF1951.png}
-  \caption{Simulation of the USAF 1951 resolution target across $NA \in \{0.01, 0.1, 1.0\}$, comparing global field views, central zoomed regions, and Michelson contrast modulation.}
+  \caption{USAF 1951 target imaged with NA = 0.01, 0.1 and 1.0. Bottom: zoom on the small groups.}
   \label{fig:part2_usaf}
 \end{figure}
 
-\textbf{Methodology:}
-\begin{enumerate}
-    \item The target image is rescaled to physical coordinates ($L = 1.2\text{ mm}$, $N = 1024$), transformed to frequency space via \texttt{fft2}, filtered with the binary pupil mask, and back-transformed using \texttt{ifft2}.
-    \item A 1D intensity cross-section is extracted across the periodic bars in the central region of interest.
-    \item The contrast is evaluated across periodic elements:
-    \[
-    C = \frac{I_{\max} - I_{\min}}{I_{\max} + I_{\min}}
-    \]
-    According to the Rayleigh criterion, two adjacent bars are considered resolved when the intensity dip between peaks is at least $19\%$ to $26\%$ ($C \ge 0.15\text{--}0.20$).
-\end{enumerate}
-
-\textbf{Observations}
-\begin{enumerate}
-  \item When $NA = 0.01$, the thick bars merges, the contrast decreases;
-  \item when $NA = 0.1$, the smallest element of the target we can see is the group 1, element 1. So, as : $Resolution = 2^{\left( \text{group number}+\frac{\text{element number}-1}{6}\right)}= 2.00 lp/mm$ in line per milimeter. $d = \frac{1}{f} \times 1000 \quad (\mu\text{m})$, so $d =  \mathbf{500\,\mu\text{m}}$.
-  \item when $NA = 1.0$, the smallest element of the target we can see is the group 1, element 2. So, as : $Resolution\approx 2.24 lp/mm$ in line per milimeter. So $d\approx \mathbf{445\,\mu\text{m}}$.
-\end{enumerate}
-
-The natural choice for NA is then $NA = 0.1$
-As the nucleus radius is about $10 \mu m$, thus, it is never discernable. 
-
-\section{Part 3 - Imaging Contrast Mechanisms}
-
-\paragraph{Q.4}
-
-In brightfield, the unscattered light dominates and the transparent cells are barely visible (only the absorbing 
-nuclei and a faint edge). In darkfield, the annular pupil blocks the unscattered (zero-frequency) 
-light: the background becomes black and only light scattered by the cells reaches the camera, so the cells appear bright, 
-mostly at their edges where the phase gradient (light deflection) is strongest. 
-Darkfield reveals the cell outlines but does not give a quantitative phase measurement.
-
-\paragraph{Q5} \textit{Phase contrast (weak object transfer function).}
-
-For a weak phase object ($\varphi \ll 1$), the field can be linearized:
-\[
-E = e^{i\varphi} \approx 1 + i\varphi .
-\]
-The unscattered component (1) and the scattered component ($i\varphi$) are in quadrature,
-so $|1 + i\varphi|^2 = 1 + \varphi^2 \approx 1$: the cells are invisible. A Zernike phase plate
-multiplies the zero frequency by $i$ (quarter-wave shift), giving
-\[
-E' = i + i\varphi = i(1+\varphi) \quad \Rightarrow \quad I = (1+\varphi)^2 \approx 1 + 2\varphi ,
-\]
-so the phase is converted linearly into intensity. Since our cells reach $\varphi \approx 30$ rad,
-far from the weak-object regime, the phase was rescaled to $\varphi_{\max} = 0.3$ rad to stay
-within the validity of the linearization. In brightfield, this weak object is only visible
-through its absorption (panel 3), whereas in phase contrast (panel 4) the cells appear as
-bright disks whose brightness follows the phase map.
-
-\begin{figure}[h]
-  \centering
-  \includegraphics[width=0.8\textwidth]{figures/part3_contrast_modes.png}
-  \caption{contrast images}
-  \label{fig:part3_contrast_modes}
-\end{figure}
-
-\section{Part 4 - Detector Sampling and Noise}
-
-\paragraph{Q6}\textit{Simulate the same object with two cameras: Pixel pitch 1 μm, SNR=30 and 3.5 μm, SNR=60
-and explain how both parameters affect your ability to resolve the objects.}
-
-The function \texttt{addCameraEffects} models the two main limitations of a real detector:
 \begin{itemize}
-  \item \textbf{Spatial sampling:} each pixel integrates the intensity over its surface. The simulation grid is resampled with \texttt{cv2.resize} (option \texttt{INTER\_AREA}, which averages over the pixel area), using the pixel size projected in the object plane, $p_{\text{pitch}}/M$.
-  \item \textbf{Photon noise:} the photon count follows a Poisson law, so $\text{SNR} = N/\sqrt{N} = \sqrt{N}$. The image is normalized so that its maximum equals $N_{\max} = \text{SNR}^2$ photons ($900$ for SNR=30, $3600$ for SNR=60), then drawn with a Poisson generator.
+  \item \textbf{NA = 0.01}: only the largest bars are separated, up to group 4 element 3 (bars of $25\,\mu$m).
+  \item \textbf{NA = 0.1}: the bars are separated up to group 7 element 5 (bars of $2.5\,\mu$m).
+  \item \textbf{NA = 1.0}: all the bars of the target are separated, even group 9 (bars of $0.55\,\mu$m), so the resolution is better than what the target can measure.
 \end{itemize}
+The resolution improves about 10 times when the NA is 10 times larger, as expected.
+
+\section{Part 3 -- Imaging Contrast Mechanisms}
+
+\paragraph{Q4} \textit{Set NA = 0.5. Modify the pupil to simulate darkfield imaging (annular pupil). Compare the image to brightfield.}
+
+For darkfield, we block the center of the pupil and keep a ring between NA = 0.05 and 0.5. In brightfield, the cells are hardly visible (only a thin edge and the nuclei). In darkfield, the background is black and the edges of the cells appear bright, because only the light deflected by the cells reaches the camera.
+
+\paragraph{Q5} \textit{Modify the pupil to simulate a phase contrast microscope.}
+
+For phase contrast, we multiply the center of the pupil (the direct light) by $i$, which is a quarter-wave phase shift. This method only works for a weak phase ($e^{i\varphi} \approx 1 + i\varphi$), but our cells reach about 30 rad. We therefore reduced the phase of the object to 0.3 rad. The cells then appear as bright disks, brighter where they are thicker.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.95\textwidth]{figures/part4_camera.png}
-  \caption{Ideal image (NA=0.5), camera A (1 $\mu$m, SNR=30) and camera B (3.5 $\mu$m, SNR=60). Top: full field. Bottom: zoom on one nucleus.}
+  \includegraphics[width=0.95\textwidth]{figures/part3_contrast_modes.png}
+  \caption{Brightfield, darkfield and phase contrast at NA = 0.5.}
+  \label{fig:part3}
+\end{figure}
+
+\section{Part 4 -- Detector Sampling and Noise}
+
+\paragraph{Q6} \textit{Write a function addCameraEffects. Simulate the same object with two cameras (pixel 1 $\mu$m, SNR = 30 and pixel 3.5 $\mu$m, SNR = 60) and explain how both parameters affect your ability to resolve the objects.}
+
+\texttt{addCameraEffects} first resamples the image to the size of the camera pixels (\texttt{cv2.resize}, which averages the light over each pixel). Then it adds Poisson (photon) noise: for an SNR of 30, the background receives $30^2 = 900$ photons per pixel.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.9\textwidth]{figures/part4_camera.png}
+  \caption{Ideal image (NA = 0.5) and the two cameras. Bottom: zoom on one nucleus.}
   \label{fig:part4_cameras}
 \end{figure}
 
-\textbf{Effect of the pixel pitch.} The pixel pitch sets the sampling frequency of the image. The Nyquist criterion requires at least 2 pixels per period of the smallest feature. A nucleus has a diameter of $10\,\mu$m, which is about $10$ pixels for camera A but only about $3$ pixels for camera B. Camera B is therefore barely above the limit: the nucleus is detected, but its shape is blocky and its contrast is diluted by the averaging over large pixels. Camera A samples it correctly. For NA=0.5, the optical Nyquist limit is $\lambda/(4\,NA)\approx 0.28\,\mu$m: both cameras are far above it, so the detector, not the objective, limits the resolution.
+\begin{itemize}
+  \item \textbf{Pixel size}: a nucleus ($10\,\mu$m) covers about 10 pixels with the 1 $\mu$m camera, but only about 3 pixels with the 3.5 $\mu$m camera. With the large pixels, the nucleus becomes a small square block and we lose its shape.
+  \item \textbf{SNR}: the noise is about $1/\text{SNR}$, so 3\% for the first camera and 2\% for the second one. The nucleus only darkens the image by about 10\%, so the noise is visible: the first image is more grainy.
+\end{itemize}
+The first camera gives the best image of the nuclei: it is noisier, but it keeps their shape. A bigger pixel collects more light (higher SNR) but gives a lower resolution.
 
-\textbf{Effect of the SNR.} Photon noise has a relative amplitude $1/\text{SNR}$ ($3.3\%$ for A, $1.7\%$ for B). It hides details whose contrast is below this level. The nuclei (transmission $0.6$) and the cells (transmission $0.85$) have a contrast well above $3.3\%$, so the noise appears as grain but does not hide them. [À adapter à vos images : décrire ce que vous voyez réellement.]
+\section{Part 5 -- Defocus and Depth of Field}
 
-\textbf{Trade-off.} A larger pixel collects more photons (hence a higher SNR) but samples the image more coarsely: this is the fundamental trade-off between spatial resolution and sensitivity.
+\paragraph{Q7} \textit{Implement a fresnelPropagate function using the angular spectrum method to simulate a 20 $\mu$m object defocus.}
 
-\textbf{Conclusion.} Camera A resolves the nuclei better: sampling is the limiting factor here, and the nuclei are contrasted enough to tolerate SNR=30. Camera B would only be preferable for very low-contrast structures with larger details.
-
-\section{Part 5 - Defocus and Depth of Field}
-
-\paragraph{Q8} \textit{Explain your reasoning behind how you constructed this simulation. Show how both layers contribute to the image.}
-
-\textbf{Construction.} Each layer is modeled as a thin object with complex transmission $t_j(x,y)=\sqrt{I_j}\,e^{i\varphi_j}$. A plane wave crosses the layers one after the other:
-\begin{enumerate}
-  \item the field right after layer 1 is $t_1$;
-  \item it propagates freely over $\Delta z$ up to layer 2 (angular spectrum method);
-  \item layer 2 \textbf{multiplies} the field by its transmission $t_2$.
-\end{enumerate}
-\[
-E_{\text{tot}} = t_2 \cdot \mathcal{P}_{\Delta z}\{t_1\}
-\]
-The layers are multiplied and not added: light goes through the first layer and then through the second one, so their phases add up, whereas an addition of fields would double the background intensity and have no physical meaning. The second layer is an independent random object generated on the same grid. The resulting field is then filtered by the pupil (NA=0.5) like in the previous parts.
-
-\textbf{Contribution of the layers.} The camera is conjugated to one plane only. Imaging $E_{\text{tot}}$ directly focuses on layer 2; to focus on layer 1, the field is back-propagated by $-\Delta z$ before the pupil filtering.
+With the angular spectrum method, we take the Fourier transform of the field, multiply each frequency by a phase term that depends on the propagation distance, and take the inverse Fourier transform. The defocused field is then imaged with NA = 0.5.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.95\textwidth]{figures/part5_two_layers.png}
-  \caption{Two-layer object ($\Delta z = 20\,\mu$m, NA=0.5). Left: focus on layer 2. Right: focus on layer 1.}
+  \includegraphics[width=0.85\textwidth]{figures/part5_defocus.png}
+  \caption{Object in focus (left) and defocused by 20 $\mu$m (right).}
+  \label{fig:part5_defocus}
+\end{figure}
+
+In focus, the cells are almost invisible. With 20 $\mu$m of defocus, the nuclei become blurred, but the cells become clearly visible with a dark edge: the defocus turns the phase into intensity. The depth of field at NA = 0.5 is only about $2\,\mu$m, so 20 $\mu$m is far out of focus.
+
+\paragraph{Q8} \textit{Extend the simulation to a two-layer object. Explain your reasoning behind how you constructed this simulation. Show how both layers contribute to the image.}
+
+The light goes through the first layer, propagates over 20 $\mu$m, then goes through the second layer. So we multiply the field of layer 1 (after propagation) by the transmission of layer 2:
+\[
+E = t_2 \times \text{propagate}(t_1,\ 20\,\mu\text{m})
+\]
+The two layers are multiplied and not added, because the light crosses them one after the other. The second layer is another random object. To focus on layer 2 we image $E$ directly; to focus on layer 1 we propagate $E$ back by $-20\,\mu$m before the pupil.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{figures/part5_two_layers.png}
+  \caption{Two-layer object: focus on layer 1 (left) and on layer 2 (right).}
   \label{fig:part5_two_layers}
 \end{figure}
 
-The depth of field is approximately $\lambda/NA^2 \approx 2.2\,\mu$m for NA=0.5, much smaller than $\Delta z = 20\,\mu$m. In each image, the layer in focus is sharp (nuclei and cell edges visible), while the other one is far out of the depth of field: it only contributes a blurred background with diffraction fringes, which lowers the contrast of the sharp layer. [À adapter à vos images : décrire ce que vous voyez réellement.] Both layers therefore contribute to the image, but only the one in focus provides usable detail. This is the principle of optical sectioning limitation in widefield microscopy: out-of-focus planes are never removed and degrade the image.
+Both layers are visible in each image. The layer in focus has sharp nuclei but almost invisible cells, while the other layer is out of focus: its cells appear with dark or bright edges and its nuclei are blurred. A widefield microscope cannot remove the out-of-focus layer, it always adds to the image.
 
-\section{ Part 6 - Assembling a Complete Microscope}
+\section{Part 6 -- Assembling a Complete Microscope}
 
-\paragraph{Q10}\textit{Visit Thorlabs’ website and find what seems to be the most appropriate component for
-your setup. Test the complete function with realistic parameters and produce a final
-simulated image.}
+\paragraph{Q9} \texttt{assembleMicroscope} chains the previous steps: defocus (if needed), filtering by the pupil of the objective, then the camera (pixel size divided by the magnification, and Poisson noise). We also added the choice between brightfield, darkfield and phase contrast.
 
-\paragraph{Q11}\textit{Using the provided real image of cells, simulate the image you should obtain through
-your microscope.}
+\paragraph{Q10} \textit{Find the most appropriate components on Thorlabs' website. Test the complete function with realistic parameters and produce a final simulated image.}
+
+We chose:
+\begin{itemize}
+  \item \textbf{Objective}: Thorlabs RMS10X (Olympus plan achromat), $10\times$, NA = 0.25;
+  \item \textbf{Camera}: Thorlabs Zelux CS165MU, $1440 \times 1080$ pixels of $3.45\,\mu$m.
+\end{itemize}
+With the $10\times$ magnification, one pixel corresponds to $0.345\,\mu$m on the sample, which is small enough compared to the resolution of the objective ($0.61\,\lambda/NA \approx 1.3\,\mu$m). The field of view is about $500 \times 370\,\mu$m, so we can see several cells at once. We used an SNR of 60.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.7\textwidth]{figures/part6_final_image.png}
+  \caption{Final simulated image with the chosen objective and camera (brightfield).}
+  \label{fig:part6_final}
+\end{figure}
+
+The cells are visible through their edges and the nuclei are well resolved.
+
+\paragraph{Q11} \textit{Using the provided real image of cells, simulate the image you should obtain through your microscope.}
+
+The image shows red blood cells, which are about 8 $\mu$m wide, i.e.\ about 70 pixels on the image. We used this to give the image its real size (about $90 \times 70\,\mu$m), then we used it as the input of \texttt{assembleMicroscope} with our objective and camera.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{figures/part6_real_cells.png}
+  \caption{Original image (left) and the same cells seen through our microscope (right).}
+  \label{fig:part6_real}
+\end{figure}
+
+The red blood cells are still well visible, but the image is less sharp and more grainy: the small details of the original image are lost because of the resolution of the objective and the larger pixels.
+
+\section*{Conclusion}
+
+We built a complete virtual microscope, from the object to the camera image. We saw that the NA sets the resolution, that transparent cells need a contrast technique (darkfield, phase contrast) or a defocus to be visible, and that the camera pixel size and noise also limit the final image.
 
 \end{document}
