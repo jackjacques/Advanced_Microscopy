@@ -184,7 +184,7 @@ and explain how both parameters affect your ability to resolve the objects.}
 The function \texttt{addCameraEffects} models the two main limitations of a real detector:
 \begin{itemize}
   \item \textbf{Spatial sampling:} each pixel integrates the intensity over its surface. The simulation grid is resampled with \texttt{cv2.resize} (option \texttt{INTER\_AREA}, which averages over the pixel area), using the pixel size projected in the object plane, $p_{\text{pitch}}/M$.
-  \item \textbf{Photon noise:} the photon count follows a Poisson law, so $\text{SNR} = \sqrt{N}$. The image is normalized so that its maximum equals $N_{\max} = \text{SNR}^2$ photons ($900$ for SNR=30, $3600$ for SNR=60), then drawn with a Poisson generator.
+  \item \textbf{Photon noise:} the photon count follows a Poisson law, so $\text{SNR} = N/\sqrt{N} = \sqrt{N}$. The image is normalized so that its maximum equals $N_{\max} = \text{SNR}^2$ photons ($900$ for SNR=30, $3600$ for SNR=60), then drawn with a Poisson generator.
 \end{itemize}
 
 \begin{figure}[H]
@@ -194,56 +194,41 @@ The function \texttt{addCameraEffects} models the two main limitations of a real
   \label{fig:part4_cameras}
 \end{figure}
 
+\textbf{Effect of the pixel pitch.} The pixel pitch sets the sampling frequency of the image. The Nyquist criterion requires at least 2 pixels per period of the smallest feature. A nucleus has a diameter of $10\,\mu$m, which is about $10$ pixels for camera A but only about $3$ pixels for camera B. Camera B is therefore barely above the limit: the nucleus is detected, but its shape is blocky and its contrast is diluted by the averaging over large pixels. Camera A samples it correctly. For NA=0.5, the optical Nyquist limit is $\lambda/(4\,NA)\approx 0.28\,\mu$m: both cameras are far above it, so the detector, not the objective, limits the resolution.
+
+\textbf{Effect of the SNR.} Photon noise has a relative amplitude $1/\text{SNR}$ ($3.3\%$ for A, $1.7\%$ for B). It hides details whose contrast is below this level. The nuclei (transmission $0.6$) and the cells (transmission $0.85$) have a contrast well above $3.3\%$, so the noise appears as grain but does not hide them. [À adapter à vos images : décrire ce que vous voyez réellement.]
+
+\textbf{Trade-off.} A larger pixel collects more photons (hence a higher SNR) but samples the image more coarsely: this is the fundamental trade-off between spatial resolution and sensitivity.
+
+\textbf{Conclusion.} Camera A resolves the nuclei better: sampling is the limiting factor here, and the nuclei are contrasted enough to tolerate SNR=30. Camera B would only be preferable for very low-contrast structures with larger details.
 
 \section{Part 5 - Defocus and Depth of Field}
 
-\paragraph{Q7} \textit{Implement a \texttt{fresnelPropagate} function using the angular spectrum method to simulate a 20 $\mu$m object defocus.}
+\paragraph{Q8} \textit{Explain your reasoning behind how you constructed this simulation. Show how both layers contribute to the image.}
 
-A field $E(x,y)$ is propagated over a distance $dz$ by multiplying its Fourier transform by the transfer function
+\textbf{Construction.} Each layer is modeled as a thin object with complex transmission $t_j(x,y)=\sqrt{I_j}\,e^{i\varphi_j}$. A plane wave crosses the layers one after the other:
+\begin{enumerate}
+  \item the field right after layer 1 is $t_1$;
+  \item it propagates freely over $\Delta z$ up to layer 2 (angular spectrum method);
+  \item layer 2 \textbf{multiplies} the field by its transmission $t_2$.
+\end{enumerate}
 \[
-H(f_x,f_y) = \exp\!\left( i\,\frac{2\pi}{\lambda}\,dz\,\sqrt{1-(\lambda f_x)^2-(\lambda f_y)^2}\right),
-\qquad
-E_{dz} = \mathcal{F}^{-1}\{\mathcal{F}\{E\}\cdot H\}.
+E_{\text{tot}} = t_2 \cdot \mathcal{P}_{\Delta z}\{t_1\}
 \]
-Evanescent waves ($(\lambda f_x)^2+(\lambda f_y)^2>1$) are removed. The defocused field is then
-filtered by the pupil (NA = 0.5) and detected.
+The layers are multiplied and not added: light goes through the first layer and then through the second one, so their phases add up, whereas an addition of fields would double the background intensity and have no physical meaning. The second layer is an independent random object generated on the same grid. The resulting field is then filtered by the pupil (NA=0.5) like in the previous parts.
+
+\textbf{Contribution of the layers.} The camera is conjugated to one plane only. Imaging $E_{\text{tot}}$ directly focuses on layer 2; to focus on layer 1, the field is back-propagated by $-\Delta z$ before the pupil filtering.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.6\textwidth]{figures/part5_defocus.png}
-  \caption{Image of the object defocused by $dz = 20\ \mu$m (NA = 0.5).}
-  \label{fig:part5_defocus}
-\end{figure}
-
-At focus, a pure phase object has $I=|E|^2$ uniform and is invisible in brightfield. After
-propagation, the different spatial frequencies accumulate different phases, which converts phase variations into
-intensity variations: the transparent cells become visible as blurred disks surrounded by interference fringes.
-The depth of field is about $\lambda/NA^2 \approx 2.2\ \mu$m for NA = 0.5, so a 20 $\mu$m defocus
-is about ten times larger and the image is strongly blurred.
-
-\paragraph{Q8} \textit{Extend the simulation to a two-layer object (two phase maps separated by $dz$). Explain your reasoning behind how you constructed this simulation. Show how both layers contribute to the image.}
-
-Light first crosses layer A, propagates over $dz$, then crosses layer B, which lies in the focal plane:
-\[
-E_{\text{out}} = t_B \cdot \mathcal{P}_{dz}\{t_A\,E_0\},
-\]
-where $t_A$, $t_B$ are the complex transmissions $\sqrt{I}\,e^{i\varphi}$ of two independent random
-cell layers, $E_0=1$ is the incident plane wave and $\mathcal{P}_{dz}$ is the Fresnel propagator of Q7.
-Multiplying by the transmissions (rather than adding fields) keeps the background at amplitude 1 and
-models two thin objects in series. The result is imaged through the pupil (NA = 0.5).
-
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=0.6\textwidth]{figures/part5_two_layers.png}
-  \caption{Two-layer object separated by $dz = 20\ \mu$m (NA = 0.5).}
+  \includegraphics[width=0.95\textwidth]{figures/part5_two_layers.png}
+  \caption{Two-layer object ($\Delta z = 20\,\mu$m, NA=0.5). Left: focus on layer 2. Right: focus on layer 1.}
   \label{fig:part5_two_layers}
 \end{figure}
 
-Both layers contribute: the layer in the focal plane gives sharp cells and nuclei, while the other layer,
-defocused by $dz$, adds a blurred background with fringes. The two cannot be separated in a single image.
+The depth of field is approximately $\lambda/NA^2 \approx 2.2\,\mu$m for NA=0.5, much smaller than $\Delta z = 20\,\mu$m. In each image, the layer in focus is sharp (nuclei and cell edges visible), while the other one is far out of the depth of field: it only contributes a blurred background with diffraction fringes, which lowers the contrast of the sharp layer. [À adapter à vos images : décrire ce que vous voyez réellement.] Both layers therefore contribute to the image, but only the one in focus provides usable detail. This is the principle of optical sectioning limitation in widefield microscopy: out-of-focus planes are never removed and degrade the image.
 
-
-\section{Assembling a Complete Microscope}
+\section{ Part 6 - Assembling a Complete Microscope}
 
 \paragraph{Q10}\textit{Visit Thorlabs’ website and find what seems to be the most appropriate component for
 your setup. Test the complete function with realistic parameters and produce a final
