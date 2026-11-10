@@ -1,7 +1,6 @@
 .venv/
 venv/
 env/
-/figures
 .vscode/
 __pycache__/
 

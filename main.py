@@ -3,6 +3,21 @@ import numpy as np
 import cv2
 
 
+# Q10 - Composants retenus pour le microscope (références à vérifier sur thorlabs.com)
+OBJECTIVE = dict(
+    name="10X / NA 0.25 objective (e.g. Olympus RMS10X, sold by Thorlabs)",
+    magnification=10.0,
+    NA=0.25,
+)
+CAMERA = dict(
+    name="Thorlabs Zelux CS165MU (Sony IMX273 sensor)",
+    pixel_pitch=3.45e-6,
+    n_cols=1440,
+    n_rows=1080,
+    snr=60,
+)
+
+
 class Microscopy:
 
     def __init__(
@@ -494,7 +509,8 @@ class Microscopy:
         return cv2.resize(image.astype(np.float64), (n_pix, n_pix),
                           interpolation=cv2.INTER_AREA)
 
-    def addCameraEffects(self, image, pixel_pitch, snr, magnification=1.0, seed=None):
+    def addCameraEffects(self, image, pixel_pitch, snr, magnification=1.0, seed=None,
+                         reference="background"):
         """Q6 - Simule une caméra : (1) intégration de la lumière par pixel,
         (2) bruit de photons (Poisson).
 
@@ -504,7 +520,10 @@ class Microscopy:
         magnification : grossissement M. Dans le plan objet, un pixel
                         correspond à pixel_pitch / M.
 
-        Retourne l'image bruitée normalisée par le fond (fond ~ 1).
+        reference     : "background" (médiane, défaut) ou "peak" (99.9e percentile,
+                        pour le fond noir du darkfield où la médiane vaut ~0).
+
+        Retourne l'image bruitée normalisée par la référence (référence ~ 1).
         """
         # 1. Rééchantillonnage : taille du pixel ramenée dans le plan objet
         pitch_obj = pixel_pitch / magnification
@@ -517,7 +536,10 @@ class Microscopy:
         # 2. Bruit de Poisson. Normalisation par le fond (médiane) et non par le
         # maximum : le maximum est une frange de bord très fine, que les gros
         # pixels moyennent, ce qui rendrait le nombre de photons dépendant du pixel.
-        background = max(np.median(resampled), 1e-12)
+        if reference == "peak":
+            background = max(np.percentile(resampled, 99.9), 1e-12)
+        else:
+            background = max(np.median(resampled), 1e-12)
         photons_bg = snr**2
         rng = np.random.default_rng(seed)
         noisy = rng.poisson(resampled / background * photons_bg)
@@ -715,43 +737,154 @@ class Microscopy:
             save_path)
 
 
-    # ================= PART 6 =================
-    def assembleMicroscope(self, NA, dz=0.0, pixel_pitch=3.45e-6,
-                           magnification=10.0, snr=50, field=None, seed=None):
-        """Pipeline complet : propagation -> pupille -> détecteur avec bruit."""
+    # ================= PART 6: Complete microscope (Q9, Q10, Q11) =================
+    def modePupil(self, NA, mode="brightfield", NA_in=0.05):
+        """Pupille selon le mode d'imagerie (Parties 2 et 3)."""
+        if mode == "brightfield":
+            return self.computePupil(NA, self.lambda_ref, self.L, self.N)
+        if mode == "darkfield":
+            return self.darkfieldPupil(NA_in, NA)
+        if mode == "phase":
+            return self.phaseContrastPupil(NA)
+        raise ValueError(f"Unknown mode '{mode}' (brightfield, darkfield, phase)")
+
+    def assembleMicroscope(self, NA, dz=0.0, pixel_pitch=3.45e-6, magnification=10.0,
+                           snr=60, field=None, seed=None, mode="brightfield", NA_in=0.05,
+                           sensor_shape=None, centre=(0.0, 0.0)):
+        """
+        Q9 - Pipeline complet :
+        (1) propagation (défocus dz, 0 = objet au point),
+        (2) filtrage par la pupille de l'objectif (brightfield / darkfield / phase),
+        (3) caméra : intégration par pixel (pitch / M) + bruit de Poisson,
+        (4) recadrage sur le champ du capteur (sensor_shape = (lignes, colonnes))
+            centré sur `centre` (m, plan objet).
+        Retourne (image, extent en µm).
+        """
         if field is None:
             field = self.get_complex_field()
-
-        # 1. Défocus (si dz = 0, l'objet est exactement au plan focal)
         if dz != 0:
             field = self.fresnelPropagate(field, dz)
 
-        # 2. Filtrage par la pupille de l'objectif
-        pupil = self.computePupil(NA, self.lambda_ref, self.L, self.N)
-        image = self.imageWithPupil(pupil, field)
-        image = image / image.max()
+        image = self.imageWithPupil(self.modePupil(NA, mode, NA_in), field)
 
-        # 3. Caméra : intégration par pixel + bruit de Poisson
-        return self.addCameraEffects(image, pixel_pitch, snr,
-                                     magnification=magnification, seed=seed)
+        reference = "peak" if mode == "darkfield" else "background"
+        cam = self.addCameraEffects(image, pixel_pitch, snr, magnification, seed=seed,
+                                    reference=reference)
 
+        # Recadrage sur le capteur
+        n = cam.shape[0]
+        p = self.L / n  # pixel effectif dans le plan objet
+        r0, c0 = 0, 0
+        rows, cols = n, n
+        if sensor_shape is not None:
+            rows, cols = min(sensor_shape[0], n), min(sensor_shape[1], n)
+            ic = int(round((centre[1] + self.L / 2) / p))
+            jc = int(round((centre[0] + self.L / 2) / p))
+            r0 = int(np.clip(ic - rows // 2, 0, n - rows))
+            c0 = int(np.clip(jc - cols // 2, 0, n - cols))
+            cam = cam[r0:r0 + rows, c0:c0 + cols]
+        x0 = (-self.L / 2 + c0 * p) * 1e6
+        y0 = (-self.L / 2 + r0 * p) * 1e6
+        extent = [x0, x0 + cols * p * 1e6, y0, y0 + rows * p * 1e6]
+        return cam, extent
 
+    def finalMicroscope(self, objective=OBJECTIVE, camera=CAMERA, NA_in=0.05,
+                        save_path="figures/part6_final_image.png"):
+        """Q10 - Microscope réaliste (composants OBJECTIVE / CAMERA) sur l'objet
+        synthétique, en brightfield, darkfield et contraste de phase."""
+        M, NA = objective["magnification"], objective["NA"]
+        p_obj = camera["pixel_pitch"] / M
+        fov = (camera["n_cols"] * p_obj * 1e6, camera["n_rows"] * p_obj * 1e6)
+        print(f"=== FINAL MICROSCOPE ===\nObjective: {objective['name']}\n"
+              f"Camera: {camera['name']}")
+        print(f"Object pixel = {p_obj*1e6:.3f} µm (Nyquist lambda/(4NA) = "
+              f"{self.lambda_ref/(4*NA)*1e6:.2f} µm), Rayleigh = "
+              f"{0.61*self.lambda_ref/NA*1e6:.2f} µm, field of view = "
+              f"{fov[0]:.0f} x {fov[1]:.0f} µm, DOF ~ {self.lambda_ref/NA**2*1e6:.1f} µm")
 
-    def imageRealCells(self, image_path, NA, mode="amplitude", phi_max=1.0, **kwargs):
+        # Centre du capteur sur le barycentre des cellules
+        cells = self.phase_map > 0
+        centre = (self.X[cells].mean(), self.Y[cells].mean()) if cells.any() else (0, 0)
+
+        modes = [("brightfield", "Brightfield"), ("darkfield", f"Darkfield (NA_in = {NA_in})"),
+                 ("phase", "Phase contrast")]
+        fig, axes = plt.subplots(1, 3, figsize=(21, 5.5), constrained_layout=True)
+        for ax, (mode, label) in zip(axes, modes):
+            img, extent = self.assembleMicroscope(
+                NA, pixel_pitch=camera["pixel_pitch"], magnification=M, snr=camera["snr"],
+                seed=0, mode=mode, NA_in=NA_in,
+                sensor_shape=(camera["n_rows"], camera["n_cols"]), centre=centre)
+            im = ax.imshow(img, cmap="gray", extent=extent, origin="lower",
+                           interpolation="nearest")
+            ax.set_title(f"{label}\n{M:.0f}X / NA {NA}, pixel {camera['pixel_pitch']*1e6:.2f} µm, "
+                         f"SNR {camera['snr']}")
+            ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
+            ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04).set_label(
+                "Intensity / peak" if mode == "darkfield" else "Intensity / background")
+        if save_path:
+            plt.savefig(save_path, dpi=150)
+        plt.show()
+
+    def realCellsComparison(self, image_path="Red Blood Cells DIC 8um.jpg",
+                            cell_diameter=8e-6, cell_diameter_px=70, phi_max=1.0,
+                            objective=OBJECTIVE, camera=CAMERA,
+                            save_path="figures/part6_real_cells.png"):
+        """
+        Q11 - Image réelle de globules rouges à travers le microscope.
+        Échelle : un globule rouge mesure cell_diameter (8 µm) et ~cell_diameter_px
+        pixels sur la photo -> taille du pixel de la photo. La photo est placée à
+        cette échelle sur une grille dédiée (pas d'étirement), complétée par le
+        niveau de fond, et retournée verticalement (ligne 0 = bas, comme la grille).
+        Deux interprétations : photo = transmission en amplitude, ou = carte de phase.
+        """
         raw = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
         if raw is None:
-            raise FileNotFoundError(f"Impossible de charger '{image_path}'.")
-        img = cv2.resize(raw, (self.N, self.N)).astype(float) / 255.0
+            raise FileNotFoundError(f"Cannot load '{image_path}'.")
+        img = np.flipud(raw.astype(float))
+        bg = np.median(img)
 
-        if mode == "amplitude":      # image vue comme une transmission
-            field = np.sqrt(img).astype(complex)
-        else:                        # image vue comme une carte de phase
-            field = np.exp(1j * phi_max * img)
+        px = cell_diameter / cell_diameter_px
+        N = int(2 ** np.ceil(np.log2(max(img.shape))))
+        grid = Microscopy(n_cells=0, L=N * px, N=N, lambda_ref=self.lambda_ref)
+        canvas = np.full((N, N), bg)
+        r0, c0 = (N - img.shape[0]) // 2, (N - img.shape[1]) // 2
+        canvas[r0:r0 + img.shape[0], c0:c0 + img.shape[1]] = img
 
-        return self.assembleMicroscope(NA, field=field, **kwargs)
+        amp_field = np.sqrt(canvas / bg).astype(complex)       # fond = 1
+        norm = (canvas - canvas.min()) / (canvas.max() - canvas.min())
+        phase_field = np.exp(1j * phi_max * norm)
 
-    
+        M, NA = objective["magnification"], objective["NA"]
+        kw = dict(pixel_pitch=camera["pixel_pitch"], magnification=M, snr=camera["snr"],
+                  seed=0, sensor_shape=(camera["n_rows"], camera["n_cols"]))
+        sim_amp, extent = grid.assembleMicroscope(NA, field=amp_field, **kw)
+        sim_phase, _ = grid.assembleMicroscope(NA, field=phase_field, mode="phase", **kw)
 
+        w, h = img.shape[1] * px * 1e6, img.shape[0] * px * 1e6
+        print(f"=== REAL CELLS: photo pixel = {px*1e9:.0f} nm, photo field = "
+              f"{w:.0f} x {h:.0f} µm, object pixel of the camera = "
+              f"{camera['pixel_pitch']/M*1e6:.3f} µm ===")
+
+        fig, axes = plt.subplots(1, 3, figsize=(21, 5.5), constrained_layout=True)
+        panels = [
+            (canvas, [-N * px * 5e5, N * px * 5e5] * 2, "Original DIC photo (to scale)"),
+            (sim_amp, extent, f"Simulated: photo as amplitude, brightfield\n"
+                              f"{M:.0f}X / NA {NA}, pixel {camera['pixel_pitch']*1e6:.2f} µm"),
+            (sim_phase, extent, f"Simulated: photo as phase (max {phi_max} rad), "
+                                f"phase contrast\n{M:.0f}X / NA {NA}"),
+        ]
+        for ax, (im_, ext, title) in zip(axes, panels):
+            im = ax.imshow(im_, cmap="gray", extent=ext, origin="lower", interpolation="nearest")
+            ax.set_xlim(-w / 2, w / 2)
+            ax.set_ylim(-h / 2, h / 2)
+            ax.set_title(title)
+            ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
+            ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        if save_path:
+            plt.savefig(save_path, dpi=150)
+        plt.show()
 
 
 if __name__ == "__main__":
@@ -778,38 +911,6 @@ if __name__ == "__main__":
     sample.defocusComparison(dz=20e-6, NA=0.5)
     sample.twoLayerComparison(dz=20e-6, NA=0.5)
 
-    # ================= PARTIE 6 : Microscope complet (Q9, Q10, Q11) =================
-    # Grille plus fine pour que la pupille de NA 0.25 tienne dans la grille de calcul
-    hr = Microscopy(n_cells=5, L=0.4e-3, N=2048, NA=0.25)
-
-    # Q10 : objectif 10X NA 0.25, caméra pixel 3.45 µm, SNR 60
-    final = hr.assembleMicroscope(NA=0.25, dz=0, pixel_pitch=3.45e-6,
-                                  magnification=10, snr=60, seed=0)
-
-    fov_um = hr.L * 1e6
-    extent_hr = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
-
-    plt.figure(figsize=(6, 5), constrained_layout=True)
-    plt.imshow(final, cmap="gray", extent=extent_hr, origin="lower",
-               interpolation="nearest")
-    plt.title("Image finale simulée (10X, NA = 0.25, pixel 3.45 µm, SNR = 60)")
-    plt.xlabel(r"$x\ (\mu\mathrm{m})$")
-    plt.ylabel(r"$y\ (\mu\mathrm{m})$")
-    plt.colorbar(label="Intensité")
-    plt.savefig("figures/part6_final_image.png", dpi=150)
-    plt.show()
-
-    # Q11 : image réelle de cellules (remplace par le nom du fichier fourni)
-    real = hr.imageRealCells("Red Blood Cells DIC 8um.jpg", NA=0.25, pixel_pitch=3.45e-6,
-                             magnification=10, snr=60, seed=0)
-
-    plt.figure(figsize=(6, 5), constrained_layout=True)
-    plt.imshow(real, cmap="gray", extent=extent_hr, origin="lower",
-               interpolation="nearest")
-    plt.title("Image réelle de cellules à travers le microscope virtuel")
-    plt.xlabel(r"$x\ (\mu\mathrm{m})$")
-    plt.ylabel(r"$y\ (\mu\mathrm{m})$")
-    plt.colorbar(label="Intensité")
-    plt.savefig("figures/part6_real_cells.png", dpi=150)
-    plt.show()
-
+    # ================= PART 6 : Complete microscope (Q9, Q10, Q11) =================
+    sample.finalMicroscope()
+    sample.realCellsComparison("Red Blood Cells DIC 8um.jpg")

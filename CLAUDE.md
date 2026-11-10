@@ -15,7 +15,7 @@ Code comments and plot titles are mostly in French; the report is in English.
 ```bash
 source .venv/bin/activate            # deps: numpy, matplotlib, opencv-python, scipy (requirements.txt)
 pip install -r requirements.txt
-mkdir -p figures && python main.py   # regenerates every figure; figures/ is gitignored
+python main.py                       # regenerates every figure in figures/ (~2.5 min)
 latexmk -pdf Report_Jacques_Angleys.tex
 ```
 
@@ -30,9 +30,9 @@ Everything lives in the `Microscopy` class, with methods grouped by assignment p
 - **Contrast modes (Part 3)**: alternative pupils (`darkfieldPupil`, `phaseContrastPupil`) applied through the generic `imageWithPupil(pupil, field)`. `contrastModes` shows them on the real object (~33 rad) and on a weak object (phase rescaled to 0.3 rad); fields are always simulated exactly with `exp(iφ)`, and `1 + iφ` is only the theory used in the report.
 - **Camera (Part 4)**: `addCameraEffects` does pixel integration (`resampleToCamera`, pitch / magnification) plus Poisson noise. SNR is defined on the background: the image is normalized by its median (not its max, which is a thin edge fringe that large pixels average away), so the background gets `SNR²` photons and the output is relative to background. `cameraComparison` reports the nucleus CNR per camera; `nucleusCentre()` gives the centroid of the most absorbing nucleus for zooms and profiles.
 - **Defocus (Part 5)**: `fresnelPropagate` (angular-spectrum propagation by `dz`). `simulate_two_layer` models two thin layers as `E = t2 · P_dz{t1}` (transmissions multiply, never add fields) and returns the images focused on layer 1 (back-propagate by `-dz`) and on layer 2; layer 2 is generated once and cached (`getLayer2`). Figures: `defocusComparison`, `twoLayerComparison`. With these phase objects, the in-focus layer is nearly invisible (only nuclei) and defocus is what makes cells visible (dark or bright rims depending on the sign of dz).
-- **Full pipeline (Part 6)**: `assembleMicroscope` chains propagate → pupil → normalize → camera; `imageRealCells` feeds a real image (`Red Blood Cells DIC 8um.jpg`) through it as amplitude or phase.
+- **Full pipeline (Part 6)**: `assembleMicroscope` chains defocus → pupil (`mode`: brightfield / darkfield / phase, via `modePupil`) → camera → crop to the sensor field, and returns `(image, extent_um)`. The Q10 components are the module constants `OBJECTIVE` and `CAMERA` (10X/NA 0.25, Zelux CS165MU 3.45 µm; part numbers to be checked on Thorlabs) used by `finalMicroscope`. `realCellsComparison` (Q11) places `Red Blood Cells DIC 8um.jpg` at true scale (8 µm cell ≈ 70 px → 114 nm/px) on its own `Microscopy(n_cells=0, ...)` grid, padded with background and flipped upright; the `.tif` in the repo is the same image.
 
-Sampling constraint: the pupil radius `fc = NA/λ` must fit inside the grid Nyquist frequency `1/(2·dx)`, i.e. `NA_max = λ/(2·dx)`. Defaults are `L = 1 mm`, `N = 4096` (`dx ≈ 0.24 µm`, `NA_max ≈ 1.1`); with the old `N = 1024`, any NA above ~0.23 meant no filtering at all. Any new grid (e.g. the Part 6 instance `Microscopy(L=0.4e-3, N=2048, ...)`) must respect this. Full-field arrays are 4096² (≈270 MB per complex array), so `makeObject` only computes each cell inside its bounding box.
+Sampling constraint: the pupil radius `fc = NA/λ` must fit inside the grid Nyquist frequency `1/(2·dx)`, i.e. `NA_max = λ/(2·dx)`. Defaults are `L = 1 mm`, `N = 4096` (`dx ≈ 0.24 µm`, `NA_max ≈ 1.1`); with the old `N = 1024`, any NA above ~0.23 meant no filtering at all. Any new grid must respect this. Full-field arrays are 4096² (≈270 MB per complex array), so `makeObject` only computes each cell inside its bounding box.
 
 Images loaded from files (row 0 = top) appear upside down with `imshow(..., origin="lower")`; synthetic maps built on the `makeGrid` grid are fine with `origin="lower"`.
 
@@ -41,4 +41,5 @@ Figure filenames (`figures/partX_*.png`) are referenced directly by `\includegra
 ## Repo notes
 
 - Commit messages follow a `type: message` prefix style (`code:`, `doc:`, `fix:`, `feat:`, `redaction:`).
+- `figures/` is tracked so the Overleaf report and teammates share the same figures: commit regenerated figures together with the code change that produced them.
 - LaTeX build artifacts (`.aux`, `.log`, `.fls`, `.fdb_latexmk`, `.synctex.gz`, …) and the report PDF are gitignored; the report is compiled on Overleaf, so only `Report_Jacques_Angleys.tex` is versioned.
