@@ -155,6 +155,15 @@ class Microscopy:
         detected_intensity = np.abs(E_out) ** 2
         return detected_intensity
 
+    def nucleusCentre(self, search_radius=20e-6):
+        """Centre (x, y) [m] du noyau le plus absorbant : barycentre des pixels
+        absorbants autour du minimum de transmission (argmin seul donne un bord)."""
+        iy, ix = np.unravel_index(np.argmin(self.intensity_map), self.intensity_map.shape)
+        x0, y0 = self.X[iy, ix], self.Y[iy, ix]
+        mask = (self.intensity_map < 1) & (
+            (self.X - x0) ** 2 + (self.Y - y0) ** 2 < search_radius**2)
+        return self.X[mask].mean(), self.Y[mask].mean()
+
     def plotPupils(self, NAs=(0.01, 0.1, 1.0),
                    save_path="figures/part2_pupil_and_cutoffs.png"):
         """Q2 - Pupilles binaires et coupes 1D pour chaque NA."""
@@ -199,8 +208,7 @@ class Microscopy:
         extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
 
         # Zoom centré sur le noyau le plus absorbant
-        iy, ix = np.unravel_index(np.argmin(self.intensity_map), self.intensity_map.shape)
-        xc, yc = self.X[iy, ix] * 1e6, self.Y[iy, ix] * 1e6
+        xc, yc = (c * 1e6 for c in self.nucleusCentre())
 
         fig, axes = plt.subplots(2, len(NAs), figsize=(5 * len(NAs), 9),
                                  constrained_layout=True)
@@ -476,82 +484,133 @@ class Microscopy:
             plt.savefig(save_path, dpi=150)
         plt.show()
 
-    # ================= PART 4 : Échantillonnage du détecteur et bruit (Q6) =================
+    # ================= PART 4: Detector sampling and noise (Q6) =================
+
+    def resampleToCamera(self, image, pitch_obj):
+        """Intègre l'image sur des pixels de taille pitch_obj (plan objet).
+        INTER_AREA = moyenne sur la surface de chaque pixel, comme un vrai pixel."""
+        n_pix = int(round(self.L / pitch_obj))
+        return cv2.resize(image.astype(np.float64), (n_pix, n_pix),
+                          interpolation=cv2.INTER_AREA)
 
     def addCameraEffects(self, image, pixel_pitch, snr, magnification=1.0, seed=None):
         """Q6 - Simule une caméra : (1) intégration de la lumière par pixel,
         (2) bruit de photons (Poisson).
 
         pixel_pitch   : pas du pixel de la caméra [m]
-        snr           : SNR au pic de l'image (nombre de photons au pic = snr^2)
+        snr           : SNR sur le fond de l'image : le fond reçoit snr^2 photons
+                        (Poisson : SNR = N / sqrt(N) = sqrt(N))
         magnification : grossissement M. Dans le plan objet, un pixel
                         correspond à pixel_pitch / M.
+
+        Retourne l'image bruitée normalisée par le fond (fond ~ 1).
         """
         # 1. Rééchantillonnage : taille du pixel ramenée dans le plan objet
         pitch_obj = pixel_pitch / magnification
         if pitch_obj < self.dx:
-            print(f"Attention : pixel objet ({pitch_obj*1e6:.2f} µm) < dx de la "
-                  f"grille ({self.dx*1e6:.2f} µm) : sur-échantillonnage, "
-                  f"pas d'information en plus. Augmente N.")
-        n_pix = int(round(self.L / pitch_obj))
-        # INTER_AREA = moyenne sur la surface couverte par chaque pixel,
-        # ce qui reproduit l'intégration de la lumière par un vrai pixel
-        resampled = cv2.resize(image.astype(np.float64), (n_pix, n_pix),
-                               interpolation=cv2.INTER_AREA)
-        resampled = np.clip(resampled, 0, None)
+            print(f"Warning: object-plane pixel ({pitch_obj*1e6:.2f} µm) < grid dx "
+                  f"({self.dx*1e6:.2f} µm): oversampling, no extra information. "
+                  f"Increase N.")
+        resampled = np.clip(self.resampleToCamera(image, pitch_obj), 0, None)
 
-        # 2. Bruit de Poisson : SNR = sqrt(N)  =>  N_pic = SNR^2 photons
-        peak_photons = snr**2
-        scaled = resampled / max(resampled.max(), 1e-12) * peak_photons
+        # 2. Bruit de Poisson. Normalisation par le fond (médiane) et non par le
+        # maximum : le maximum est une frange de bord très fine, que les gros
+        # pixels moyennent, ce qui rendrait le nombre de photons dépendant du pixel.
+        background = max(np.median(resampled), 1e-12)
+        photons_bg = snr**2
         rng = np.random.default_rng(seed)
-        noisy = rng.poisson(scaled)
+        noisy = rng.poisson(resampled / background * photons_bg)
 
-        # 3. Retour à une échelle relative (pic ~ 1) pour l'affichage
-        return noisy / peak_photons
+        # 3. Échelle relative au fond pour l'affichage
+        return noisy / photons_bg
 
     def cameraComparison(self, NA=0.5, cameras=((1e-6, 30), (3.5e-6, 60)),
-                         magnification=1.0, half_window_um=30):
+                         magnification=1.0, half_window_um=30,
+                         save_path="figures/part4_camera.png"):
         """Q6 - Même objet, deux caméras : (pixel 1 µm, SNR 30) vs (pixel 3.5 µm, SNR 60).
-        Ligne du haut : champ complet. Ligne du bas : zoom sur un noyau."""
+        Ligne 1 : champ complet. Ligne 2 : zoom sur un noyau.
+        Ligne 3 : profil horizontal à travers le noyau.
+        Affiche aussi le CNR du noyau : (I_fond - I_noyau) / sigma_fond."""
         ideal = self.applyPupilImaging(NA)
-        ideal = ideal / ideal.max()
+        ideal = ideal / np.median(ideal)  # fond = 1
 
-        images = [ideal]
-        titles = [f"Image idéale\n(dx = {self.dx*1e6:.2f} µm, sans bruit)"]
+        # Noyau le plus absorbant : centre du zoom et ligne du profil
+        xc, yc = self.nucleusCentre()
+
+        # Masques "cellule" et "ce noyau" sur la grille fine (pour le CNR)
+        cell_mask = (self.phase_map > 0).astype(float)
+        near = (self.X - xc) ** 2 + (self.Y - yc) ** 2 < (half_window_um * 1e-6 / 2) ** 2
+        nuc_mask = ((self.intensity_map < 1) & near).astype(float)
 
         nyquist_um = self.lambda_ref / (4 * NA) * 1e6
         nuc_diam_um = 2 * self.nucleus_radius_frac * self.cell_radius_mean * 1e6
-        print(f"=== CAMÉRAS (NA = {NA}, M = {magnification}) ===")
-        print(f"Nyquist pour la NA : pixel objet <= lambda/(4NA) = {nyquist_um:.2f} µm")
+        print(f"=== CAMERAS (NA = {NA}, M = {magnification}) ===")
+        print(f"Nyquist for this NA: object pixel <= lambda/(4NA) = {nyquist_um:.2f} µm")
+
+        entries = [(ideal, self.dx, f"Ideal image\n(dx = {self.dx*1e6:.2f} µm, no noise)")]
         for pitch, snr in cameras:
-            p_obj = pitch / magnification * 1e6
-            print(f"Pixel {pitch*1e6:.1f} µm, SNR {snr} : pixel objet = {p_obj:.2f} µm, "
-                  f"{snr**2} photons au pic, noyau ~ {nuc_diam_um/p_obj:.1f} pixels de large")
-            images.append(self.addCameraEffects(ideal, pitch, snr, magnification, seed=0))
-            titles.append(f"Pixel {pitch*1e6:.1f} µm, SNR = {snr}")
+            p_obj = pitch / magnification
+            img = self.addCameraEffects(ideal, pitch, snr, magnification, seed=0)
+
+            # CNR du noyau : pixels hors cellules = fond, pixels couverts à >50 % = noyau
+            bg = self.resampleToCamera(cell_mask, p_obj) == 0
+            nuc_cov = self.resampleToCamera(nuc_mask, p_obj)
+            nuc = nuc_cov > 0.5
+            if not nuc.any():
+                nuc = nuc_cov == nuc_cov.max()
+            I_bg, sigma_bg = img[bg].mean(), img[bg].std()
+            cnr = (I_bg - img[nuc].mean()) / sigma_bg
+            print(f"Pixel {pitch*1e6:.1f} µm, SNR {snr}: object pixel = {p_obj*1e6:.2f} µm, "
+                  f"{snr**2} photons on background, nucleus ~ {nuc_diam_um/(p_obj*1e6):.1f} px wide, "
+                  f"background noise = {sigma_bg*100:.1f} %, nucleus CNR per pixel = {cnr:.1f} "
+                  f"({nuc.sum()} px), CNR x sqrt(n_px) = {cnr*np.sqrt(nuc.sum()):.1f}")
+            entries.append((img, p_obj, f"Pixel {pitch*1e6:.1f} µm, SNR = {snr}\n"
+                                         f"nucleus CNR/pixel = {cnr:.1f}"))
 
         fov_um = self.L * 1e6
         extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
+        vmin, vmax = 0.75, 1.25
 
-        # Zoom centré sur un noyau (premier pixel de transmission minimale)
-        iy, ix = np.unravel_index(np.argmin(self.intensity_map), self.intensity_map.shape)
-        xc, yc = self.X[iy, ix] * 1e6, self.Y[iy, ix] * 1e6
-
-        fig, axes = plt.subplots(2, len(images), figsize=(5 * len(images), 9),
-                                 constrained_layout=True)
-        for col, (img, title) in enumerate(zip(images, titles)):
+        fig = plt.figure(figsize=(5 * len(entries), 13), constrained_layout=True)
+        gs = fig.add_gridspec(3, len(entries), height_ratios=[1, 1, 0.7])
+        ax_p = fig.add_subplot(gs[2, :])
+        for col, (img, p_obj, title) in enumerate(entries):
             for row in range(2):
-                ax = axes[row, col]
-                ax.imshow(img, cmap="gray", extent=extent, origin="lower",
-                          interpolation="nearest", vmin=0.3, vmax=1.1)
+                ax = fig.add_subplot(gs[row, col])
+                im = ax.imshow(img, cmap="gray", extent=extent, origin="lower",
+                               interpolation="nearest", vmin=vmin, vmax=vmax)
                 ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
+                ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
                 if row == 0:
                     ax.set_title(title)
                 else:
-                    ax.set_xlim(xc - half_window_um, xc + half_window_um)
-                    ax.set_ylim(yc - half_window_um, yc + half_window_um)
-        plt.savefig("figures/part4_camera.png", dpi=150)
+                    ax.set_xlim((xc * 1e6) - half_window_um, (xc * 1e6) + half_window_um)
+                    ax.set_ylim((yc * 1e6) - half_window_um, (yc * 1e6) + half_window_um)
+                    ax.axhline(yc * 1e6, color="crimson", lw=0.8, ls="--")
+                    ax.set_title("Zoom on a nucleus")
+                fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04).set_label(
+                    "Intensity / background")
+
+            # Profil horizontal à travers le noyau (ligne de pixels contenant yc)
+            n = img.shape[0]
+            centres = (np.arange(n) + 0.5) * self.L / n - self.L / 2
+            row_idx = int(np.clip(np.floor((yc + self.L / 2) / (self.L / n)), 0, n - 1))
+            sel = np.abs(centres - xc) <= half_window_um * 1e-6
+            label = title.split("\n")[0]
+            if col == 0:
+                ax_p.plot(centres[sel] * 1e6, img[row_idx, sel], "k-", lw=1, label=label)
+            else:
+                ax_p.step(centres[sel] * 1e6, img[row_idx, sel], where="mid", label=label)
+        ax_p.set_title("Horizontal profile through the nucleus (dashed line)")
+        ax_p.set_xlabel(r"$x\ (\mu\mathrm{m})$")
+        ax_p.set_ylabel("Intensity / background")
+        ax_p.grid(True, ls=":", alpha=0.6)
+        ax_p.legend()
+
+        if save_path:
+            plt.savefig(save_path, dpi=150)
         plt.show()
+
     # ================= PART 5  =================
     def fresnelPropagate(self, field, dz, wavelength=None):
         
