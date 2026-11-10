@@ -34,6 +34,7 @@ class Microscopy:
         coords = np.linspace(-self.L / 2, self.L / 2, self.N)
         self.X, self.Y = np.meshgrid(coords, coords)
 
+        # 2. Cartes d'objet
         self.phase_map, self.intensity_map = self.makeObject(
             n_cells=self.n_cells,
             cell_radius_mean=self.cell_radius_mean,
@@ -212,17 +213,24 @@ class Microscopy:
             im_phase, ax=ax_phase, fraction=0.046, pad=0.04
         ).set_label("Phase (rad)")
 
-        plt.savefig("figures/part1_Intensity_and_Phase_maps.png", dpi=150)
         plt.show()
 
     def resolution(
-        self, image_path="usaf.png", NAs=[0.01, 0.1, 1.0], zoom_radius_um=150
+        self,
+        image_path="usaf.png",
+        NAs=[0.01, 0.1, 1.0],
     ):
+        """Simule l'imagerie de la mire USAF et calcule les résolutions associées."""
+        # 1. Chargement avec canal alpha éventuel (UNCHANGED)
         raw_img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
         if raw_img is None:
-            raise FileNotFoundError(f"Impossible de charger '{image_path}'")
+            raise FileNotFoundError(
+                f"Impossible de charger '{image_path}'. Vérifie le nom et le dossier."
+            )
 
+        # Gestion du canal alpha (transparence SVG -> PNG)
         if raw_img.ndim == 3 and raw_img.shape[2] == 4:
+            # Fond blanc : là où alpha == 0, on met du blanc (255)
             alpha = raw_img[:, :, 3] / 255.0
             gray = cv2.cvtColor(raw_img[:, :, :3], cv2.COLOR_BGR2GRAY)
             img = (gray * alpha + 255 * (1 - alpha)).astype(np.uint8)
@@ -231,93 +239,70 @@ class Microscopy:
         else:
             img = raw_img
 
+        # 2. Redimensionnement et normalisation [0, 1]
         img_resized = cv2.resize(img, (self.N, self.N))
-        target = img_resized.astype(float) / 255.0
-        if np.mean(target) < 0.5:
-            target = 1.0 - target
+        target_amplitude = img_resized.astype(float) / 255.0
 
-        E_in = target.astype(complex)
+        # Si l'image est inversée (fond noir au lieu de blanc), on ré-inverse
+        if np.mean(target_amplitude) < 0.5:
+            target_amplitude = 1.0 - target_amplitude
+
+        # 3. Champ d'onde incident et TF 2D
+        E_in = target_amplitude.astype(complex)
         E_fft = np.fft.fftshift(np.fft.fft2(E_in))
 
         fov_um = self.L * 1e6
         extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
 
-        # 2 lignes : Plein champ en haut, Zoom central en bas
         fig, axes = plt.subplots(
-            2, len(NAs) + 1, figsize=(16, 7.5), constrained_layout=True
+            1, len(NAs) + 1, figsize=(16, 4.5), constrained_layout=True
         )
 
-        # Mire originale
-        axes[0, 0].imshow(
-            target,
+        # Affichage de la mire originale
+        axes[0].imshow(
+            target_amplitude,
             cmap="gray",
             extent=extent,
             origin="lower",
             vmin=0,
             vmax=1,
         )
-        axes[0, 0].set_title("Mire originale")
-        axes[1, 0].imshow(
-            target,
-            cmap="gray",
-            extent=extent,
-            origin="lower",
-            vmin=0,
-            vmax=1,
-        )
-        axes[1, 0].set_title("Zoom centre")
-        axes[1, 0].set_xlim(-zoom_radius_um, zoom_radius_um)
-        axes[1, 0].set_ylim(-zoom_radius_um, zoom_radius_um)
+        axes[0].set_title("Mire originale")
+        axes[0].set_xlabel(r"$x\ (\mu\mathrm{m})$")
+        axes[0].set_ylabel(r"$y\ (\mu\mathrm{m})$")
 
-        r_center_pix = int((zoom_radius_um * 1e-6) / self.dx)
-        c0 = self.N // 2
-
-        for col, na in enumerate(NAs, start=1):
+        print("=== RÉSULTATS DE RÉSOLUTION THÉORIQUE ===")
+        # 4. Simulation pour chaque NA
+        for ax, na in zip(axes[1:], NAs):
             pupil = self.computePupil(na, self.lambda_ref, self.L, self.N)
-            E_out = np.fft.ifft2(np.fft.ifftshift(E_fft * pupil))
-            img_det = np.abs(E_out) ** 2
+            E_filtered = E_fft * pupil
+            E_out = np.fft.ifft2(np.fft.ifftshift(E_filtered))
+            img_detected = np.abs(E_out) ** 2
 
-            # Contraste calculé sur la région centrale (mires fines)
-            crop = img_det[
-                c0 - r_center_pix : c0 + r_center_pix,
-                c0 - r_center_pix : c0 + r_center_pix,
-            ]
-            c_measured = (crop.max() - crop.min()) / max(
-                crop.max() + crop.min(), 1e-12
-            )
-            r_rayleigh = (0.61 * self.lambda_ref / na) * 1e6
+            # Calculs des résolutions théoriques
+            r_abbe = (self.lambda_ref / (2 * na)) * 1e6  # en µm
+            r_rayleigh = (0.61 * self.lambda_ref / na) * 1e6  # en µm
+            fc = na / self.lambda_ref  # Fréquence de coupure en m^-1
 
-            # Ligne 1 : Champ complet
-            axes[0, col].imshow(
-                img_det,
+            print(f"NA = {na:4.2f} :")
+            print(f"  - Coupure fc         : {fc*1e-3:.1f} cycles/mm")
+            print(f"  - Limite Abbe (λ/2NA): {r_abbe:.2f} µm")
+            print(f"  - Critère Rayleigh   : {r_rayleigh:.2f} µm")
+
+            # Affichage normalisé pour éviter l'écran noir
+            im = ax.imshow(
+                img_detected,
                 cmap="gray",
                 extent=extent,
                 origin="lower",
-                vmin=img_det.min(),
-                vmax=img_det.max(),
+                vmin=np.min(img_detected),
+                vmax=np.max(img_detected),
             )
-            axes[0, col].set_title(
-                f"NA = {na}\nRayleigh: {r_rayleigh:.2f} µm | C: {c_measured*100:.0f}%"
-            )
-            axes[0, col].set_xlabel(r"$x\ (\mu\mathrm{m})$")
+            ax.set_title(f"NA = {na}\nRayleigh: {r_rayleigh:.2f} µm")
+            ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
+            ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
 
-            # Ligne 2 : Zoom central
-            axes[1, col].imshow(
-                img_det,
-                cmap="gray",
-                extent=extent,
-                origin="lower",
-                vmin=img_det.min(),
-                vmax=img_det.max(),
-            )
-            axes[1, col].set_title(f"Zoom centre (NA = {na})")
-            axes[1, col].set_xlim(-zoom_radius_um, zoom_radius_um)
-            axes[1, col].set_ylim(-zoom_radius_um, zoom_radius_um)
-            axes[1, col].set_xlabel(r"$x\ (\mu\mathrm{m})$")
-
-        plt.savefig(
-            "figures/part2_Resolution_calibration_USAF1951.png", dpi=150
-        )
+        print("=========================================")
         plt.show()
 
     # ================= PART 3: Imaging contrast mechanisms (Q4, Q5) =================
@@ -382,7 +367,7 @@ class Microscopy:
             ax.set_title(title)
             ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
             fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        plt.savefig("figures/part3_contrast_modes.png", dpi=150)
+        plt.savefig("part3_contrast_modes.png", dpi=150)
         plt.show()
 
     # ================= PART 4 : Échantillonnage du détecteur et bruit (Q6) =================
@@ -400,7 +385,8 @@ class Microscopy:
         pitch_obj = pixel_pitch / magnification
         if pitch_obj < self.dx:
             print(f"Attention : pixel objet ({pitch_obj*1e6:.2f} µm) < dx de la "
-                  f"grille")
+                  f"grille ({self.dx*1e6:.2f} µm) : sur-échantillonnage, "
+                  f"pas d'information en plus. Augmente N.")
         n_pix = int(round(self.L / pitch_obj))
         # INTER_AREA = moyenne sur la surface couverte par chaque pixel,
         # ce qui reproduit l'intégration de la lumière par un vrai pixel
@@ -460,14 +446,14 @@ class Microscopy:
                     ax.set_ylim(yc - half_window_um, yc + half_window_um)
         plt.savefig("part4_camera.png", dpi=150)
         plt.show()
-
+    ## partie 5 
     def fresnelPropagate(self, field, dz, wavelength=None):
         
         wl = self.lambda_ref if wavelength is None else wavelength
         f = np.fft.fftfreq(self.N, d=self.dx)
         FX, FY = np.meshgrid(f, f)
 
-        arg = 1.0 - (wl * FX) * 2 - (wl * FY) * 2
+        arg = 1.0 - (wl * FX) ** 2 - (wl * FY) ** 2
         propagating = arg > 0                       # ondes évanescentes (arg < 0) : supprimées
         kz = 2 * np.pi / wl * np.sqrt(np.maximum(arg, 0.0))
         H = np.exp(1j * kz * dz) * propagating
@@ -500,19 +486,17 @@ class Microscopy:
 
     
 
-    
-
 
 
 if __name__ == "__main__":
 
     np.random.seed(0)
     #  Cell sample
-    sample = Microscopy(n_cells=10, absorptive=True)
+    sample = Microscopy(n_cells=8)
 
     # Maps
     sample.plot_obj()
-    sample.save_figure_pupils()
+
     # USAF resolutions
     sample.resolution("usaf.png")
 
@@ -526,18 +510,13 @@ if __name__ == "__main__":
 
     for ax, na in zip(axes, NAs):
         image = sample.applyPupilImaging(na)
-
-        im = ax.imshow(
-            image, cmap="gray", extent=extent, origin="lower", vmin=0, vmax=1
-        )        
+        im = ax.imshow(image, cmap="gray", extent=extent, origin="lower")
         ax.set_title(f"Cellules détectées (NA = {na})")
         ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
         ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-    plt.savefig("figures/part2_cells_vs_NA.png")
     plt.show()
-
     
     sample.contrastModes(NA=0.5)
 
@@ -576,3 +555,4 @@ if __name__ == "__main__":
     plt.ylabel(r"$y\ (\mu\mathrm{m})$")
     plt.colorbar(label="Intensité")
     plt.show()
+
