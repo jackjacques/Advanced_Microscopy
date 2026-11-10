@@ -410,36 +410,70 @@ class Microscopy:
         E_out = np.fft.ifft2(np.fft.ifftshift(E_fourier * pupil))
         return np.abs(E_out) ** 2
 
-    def contrastModes(self, NA=0.5, NA_in=0.05, phi_max_weak=0.3):
-        """Q4 + Q5: compare brightfield, darkfield and phase contrast."""
-        # Q4: brightfield vs darkfield on the real object
-        bright = self.imageWithPupil(self.computePupil(NA, self.lambda_ref, self.L, self.N))
-        dark = self.imageWithPupil(self.darkfieldPupil(NA_in, NA))
+    def contrastModes(self, NA=0.5, NA_in=0.05, phi_max_weak=0.3,
+                      save_path="figures/part3_contrast_modes.png"):
+        """
+        Q4 + Q5 : brightfield, darkfield et contraste de phase.
+        Ligne 1 : objet réel (phase jusqu'à ~30 rad).
+        Ligne 2 : objet faible (phase réduite à phi_max_weak) + profil 1D.
+        Le champ est toujours simulé exactement (exp(i*phi)) ; la linéarisation
+        1 + i*phi ne sert qu'à l'interprétation théorique.
+        """
+        P = self.computePupil(NA, self.lambda_ref, self.L, self.N)
+        P_dark = self.darkfieldPupil(NA_in, NA)
+        P_phc = self.phaseContrastPupil(NA)
 
-        # Q5: weak object -> linearization exp(i phi) ~ 1 + i phi
-        # Our cells reach ~30 rad, far from "weak" (phi << 1):
-        # we rescale the phase to phi_max_weak to stay in the validity domain.
+        # Ligne 1 : objet réel
+        bright = self.imageWithPupil(P)
+        dark = self.imageWithPupil(P_dark)
+        phc = self.imageWithPupil(P_phc)
+
+        # Ligne 2 : objet faible (phi << 1), champ exact
         phi_weak = self.phase_map / self.phase_map.max() * phi_max_weak
-        field_weak = np.sqrt(self.intensity_map) * (1 + 1j * phi_weak)
-        bright_weak = self.imageWithPupil(
-            self.computePupil(NA, self.lambda_ref, self.L, self.N), field_weak)
-        phase_contrast = self.imageWithPupil(self.phaseContrastPupil(NA), field_weak)
+        field_weak = np.sqrt(self.intensity_map) * np.exp(1j * phi_weak)
+        bright_weak = self.imageWithPupil(P, field_weak)
+        phc_weak = self.imageWithPupil(P_phc, field_weak)
 
         fov_um = self.L * 1e6
         extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
-        images = [bright, dark, bright_weak, phase_contrast]
-        titles = [f"Brightfield (NA = {NA})",
-                  f"Darkfield ({NA_in} < NA <= {NA})",
-                  f"Brightfield, weak object",
-                  f"Phase contrast, weak object"]
 
-        fig, axes = plt.subplots(1, 4, figsize=(20, 4.5), constrained_layout=True)
-        for ax, img, title in zip(axes, images, titles):
+        fig, axes = plt.subplots(2, 3, figsize=(16, 10), constrained_layout=True)
+        panels = [
+            (axes[0, 0], bright, f"Brightfield, real object (NA = {NA})"),
+            (axes[0, 1], dark, f"Darkfield, real object ({NA_in} < NA ≤ {NA})"),
+            (axes[0, 2], phc, f"Phase contrast, real object (NA = {NA})"),
+            (axes[1, 0], bright_weak,
+             rf"Brightfield, weak object ($\varphi_{{max}}$ = {phi_max_weak} rad)"),
+            (axes[1, 1], phc_weak,
+             rf"Phase contrast, weak object ($\varphi_{{max}}$ = {phi_max_weak} rad)"),
+        ]
+        for ax, img, title in panels:
             im = ax.imshow(img, cmap="gray", extent=extent, origin="lower")
             ax.set_title(title)
             ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
-            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        plt.savefig("figures/part3_contrast_modes.png", dpi=150)
+            ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04).set_label("Intensity")
+
+        # Profil 1D à travers la cellule de phase maximale
+        iy, ix = np.unravel_index(np.argmax(self.phase_map), self.phase_map.shape)
+        x_um = self.X[iy, :] * 1e6
+        half = 1.5 * self.cell_radius_mean * 1e6
+        sel = np.abs(x_um - x_um[ix]) <= half
+        for ax in (axes[1, 0], axes[1, 1]):
+            ax.axhline(self.Y[iy, 0] * 1e6, color="crimson", lw=0.8, ls="--")
+        ax_p = axes[1, 2]
+        ax_p.plot(x_um[sel], bright_weak[iy, sel], label="Brightfield")
+        ax_p.plot(x_um[sel], phc_weak[iy, sel], label="Phase contrast")
+        ax_p.plot(x_um[sel], (1 + phi_weak[iy, sel]) ** 2, "k--", lw=1,
+                  label=r"Theory $(1+\varphi)^2$")
+        ax_p.set_title("Weak object: profile along the dashed line")
+        ax_p.set_xlabel(r"$x\ (\mu\mathrm{m})$")
+        ax_p.set_ylabel("Intensity")
+        ax_p.grid(True, ls=":", alpha=0.6)
+        ax_p.legend()
+
+        if save_path:
+            plt.savefig(save_path, dpi=150)
         plt.show()
 
     # ================= PART 4 : Échantillonnage du détecteur et bruit (Q6) =================
