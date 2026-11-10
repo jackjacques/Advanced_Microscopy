@@ -219,6 +219,7 @@ class Microscopy:
         self,
         image_path="usaf.png",
         NAs=[0.01, 0.1, 1.0],
+        zoom_radius_um=150,
     ):
         """Simule l'imagerie de la mire USAF et calcule les résolutions associées."""
         # 1. Chargement avec canal alpha éventuel (UNCHANGED)
@@ -255,11 +256,11 @@ class Microscopy:
         extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
 
         fig, axes = plt.subplots(
-            1, len(NAs) + 1, figsize=(16, 4.5), constrained_layout=True
+            2, len(NAs) + 1, figsize=(16, 7.5), constrained_layout=True
         )
 
         # Affichage de la mire originale
-        axes[0].imshow(
+        axes[0,0].imshow(
             target_amplitude,
             cmap="gray",
             extent=extent,
@@ -267,42 +268,67 @@ class Microscopy:
             vmin=0,
             vmax=1,
         )
-        axes[0].set_title("Mire originale")
-        axes[0].set_xlabel(r"$x\ (\mu\mathrm{m})$")
-        axes[0].set_ylabel(r"$y\ (\mu\mathrm{m})$")
+        axes[0, 0].set_title("Mire originale")
+        axes[1, 0].imshow(
+            target_amplitude,
+            cmap="gray",
+            extent=extent,
+            origin="lower",
+            vmin=0,
+            vmax=1,
+        )
+        axes[1, 0].set_title("Zoom centre")
+        axes[1, 0].set_xlim(-zoom_radius_um, zoom_radius_um)
+        axes[1, 0].set_ylim(-zoom_radius_um, zoom_radius_um)
 
-        print("=== RÉSULTATS DE RÉSOLUTION THÉORIQUE ===")
-        # 4. Simulation pour chaque NA
-        for ax, na in zip(axes[1:], NAs):
+        r_center_pix = int((zoom_radius_um * 1e-6) / self.dx)
+        c0 = self.N // 2
+        for col, na in enumerate(NAs, start=1):
             pupil = self.computePupil(na, self.lambda_ref, self.L, self.N)
-            E_filtered = E_fft * pupil
-            E_out = np.fft.ifft2(np.fft.ifftshift(E_filtered))
-            img_detected = np.abs(E_out) ** 2
+            E_out = np.fft.ifft2(np.fft.ifftshift(E_fft * pupil))
+            img_det = np.abs(E_out) ** 2
 
-            # Calculs des résolutions théoriques
-            r_abbe = (self.lambda_ref / (2 * na)) * 1e6  # en µm
-            r_rayleigh = (0.61 * self.lambda_ref / na) * 1e6  # en µm
-            fc = na / self.lambda_ref  # Fréquence de coupure en m^-1
+            # Contraste calculé sur la région centrale (mires fines)
+            crop = img_det[
+                c0 - r_center_pix : c0 + r_center_pix,
+                c0 - r_center_pix : c0 + r_center_pix,
+            ]
+            c_measured = (crop.max() - crop.min()) / max(
+                crop.max() + crop.min(), 1e-12
+            )
+            r_rayleigh = (0.61 * self.lambda_ref / na) * 1e6
 
-            print(f"NA = {na:4.2f} :")
-            print(f"  - Coupure fc         : {fc*1e-3:.1f} cycles/mm")
-            print(f"  - Limite Abbe (λ/2NA): {r_abbe:.2f} µm")
-            print(f"  - Critère Rayleigh   : {r_rayleigh:.2f} µm")
-
-            # Affichage normalisé pour éviter l'écran noir
-            im = ax.imshow(
-                img_detected,
+            # Ligne 1 : Champ complet
+            axes[0, col].imshow(
+                img_det,
                 cmap="gray",
                 extent=extent,
                 origin="lower",
-                vmin=np.min(img_detected),
-                vmax=np.max(img_detected),
+                vmin=img_det.min(),
+                vmax=img_det.max(),
             )
-            ax.set_title(f"NA = {na}\nRayleigh: {r_rayleigh:.2f} µm")
-            ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
-            ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
+            axes[0, col].set_title(
+                f"NA = {na}\nRayleigh: {r_rayleigh:.2f} µm | C: {c_measured*100:.0f}%"
+            )
+            axes[0, col].set_xlabel(r"$x\ (\mu\mathrm{m})$")
 
-        print("=========================================")
+            # Ligne 2 : Zoom central
+            axes[1, col].imshow(
+                img_det,
+                cmap="gray",
+                extent=extent,
+                origin="lower",
+                vmin=img_det.min(),
+                vmax=img_det.max(),
+            )
+            axes[1, col].set_title(f"Zoom centre (NA = {na})")
+            axes[1, col].set_xlim(-zoom_radius_um, zoom_radius_um)
+            axes[1, col].set_ylim(-zoom_radius_um, zoom_radius_um)
+            axes[1, col].set_xlabel(r"$x\ (\mu\mathrm{m})$")
+
+        plt.savefig(
+            "figures/part2_Resolution_calibration_USAF1951.png", dpi=150
+        )
         plt.show()
 
     # ================= PART 3: Imaging contrast mechanisms (Q4, Q5) =================
