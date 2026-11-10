@@ -155,12 +155,13 @@ class Microscopy:
         detected_intensity = np.abs(E_out) ** 2
         return detected_intensity
 
-    def nucleusCentre(self, search_radius=20e-6):
+    def nucleusCentre(self, search_radius=20e-6, intensity_map=None):
         """Centre (x, y) [m] du noyau le plus absorbant : barycentre des pixels
         absorbants autour du minimum de transmission (argmin seul donne un bord)."""
-        iy, ix = np.unravel_index(np.argmin(self.intensity_map), self.intensity_map.shape)
+        I = self.intensity_map if intensity_map is None else intensity_map
+        iy, ix = np.unravel_index(np.argmin(I), I.shape)
         x0, y0 = self.X[iy, ix], self.Y[iy, ix]
-        mask = (self.intensity_map < 1) & (
+        mask = (I < 1) & (
             (self.X - x0) ** 2 + (self.Y - y0) ** 2 < search_radius**2)
         return self.X[mask].mean(), self.Y[mask].mean()
 
@@ -611,49 +612,108 @@ class Microscopy:
             plt.savefig(save_path, dpi=150)
         plt.show()
 
-    # ================= PART 5  =================
+    # ================= PART 5: Defocus and depth of field (Q7, Q8) =================
     def fresnelPropagate(self, field, dz, wavelength=None):
-        
+        """Q7 - Propagation libre sur dz par la méthode du spectre angulaire :
+        E(z+dz) = TF^-1{ TF{E} * exp(i kz dz) }, kz = 2pi/lambda sqrt(1 - (lambda fx)^2 - (lambda fy)^2).
+        Les ondes évanescentes (argument négatif) sont supprimées."""
         wl = self.lambda_ref if wavelength is None else wavelength
         f = np.fft.fftfreq(self.N, d=self.dx)
         FX, FY = np.meshgrid(f, f)
 
         arg = 1.0 - (wl * FX) ** 2 - (wl * FY) ** 2
-        propagating = arg > 0                       # ondes évanescentes (arg < 0) : supprimées
+        propagating = arg > 0
         kz = 2 * np.pi / wl * np.sqrt(np.maximum(arg, 0.0))
         H = np.exp(1j * kz * dz) * propagating
 
         return np.fft.ifft2(np.fft.fft2(field) * H)
 
+    def getLayer2(self):
+        """Deuxième couche : objet indépendant, mêmes paramètres, généré une seule
+        fois (reproductible). Retourne (phase, intensité)."""
+        if not hasattr(self, "_layer2"):
+            self._layer2 = self.makeObject(
+                n_cells=self.n_cells, cell_radius_mean=self.cell_radius_mean,
+                cell_radius_sigma=self.cell_radius_sigma,
+                nucleus_radius_frac=self.nucleus_radius_frac, delta_n=self.delta_n,
+                lambda_ref=self.lambda_ref, L=self.L, N=self.N,
+                nucleus_amplitude=self.nucleus_amplitude,
+            )
+        return self._layer2
+
     def simulate_two_layer(self, dz, NA):
         """
-        Simule un objet à deux couches séparées par dz et passe le tout 
-        à travers le système d'imagerie du microscope (pupille et NA).
+        Q8 - Objet à deux couches minces séparées de dz.
+        La lumière traverse la couche 1 (t1), se propage sur dz, puis traverse la
+        couche 2 (t2) : E = t2 * P_dz{t1} (les transmissions se multiplient).
+        Retourne (image mise au point sur la couche 1, image mise au point sur la couche 2).
+        Mise au point sur la couche 1 = rétro-propagation de E sur -dz avant la pupille.
         """
-        # 1. Champ de la couche 1 (dans le plan focal z = 0)
-        E1 = self.get_complex_field()
-        
-        # 2. Génération d'une deuxième couche (deuxième objet indépendant) 
-        # et propagation de Fresnel sur la distance dz
-        phase2, intensity2 = self.makeObject(
-            n_cells=self.n_cells, cell_radius_mean=self.cell_radius_mean,
-            cell_radius_sigma=self.cell_radius_sigma,
-            nucleus_radius_frac=self.nucleus_radius_frac, delta_n=self.delta_n,
-            lambda_ref=self.lambda_ref, L=self.L, N=self.N,
-            nucleus_amplitude=self.nucleus_amplitude,
-        )
-        E2_initial = np.sqrt(intensity2) * np.exp(1j * phase2)
-        E2_propagated = self.fresnelPropagate(E2_initial, dz=dz)
-        
-        # 3. Superposition des deux champs au niveau de l'objet
-        E_total = E1 + E2_propagated
-        
-        # 4. Passage à travers le système optique du microscope (Pupille / NA)
-        pupil = self.computePupil(NA=NA, lambda_ref=self.lambda_ref, L=self.L, N=self.N)
-        image_two_layers = self.imageWithPupil(pupil, field=E_total)
-        
-        return image_two_layers
-    
+        t1 = self.get_complex_field()
+        phase2, intensity2 = self.getLayer2()
+        t2 = np.sqrt(intensity2) * np.exp(1j * phase2)
+
+        E = t2 * self.fresnelPropagate(t1, dz)
+
+        pupil = self.computePupil(NA, self.lambda_ref, self.L, self.N)
+        focus_layer2 = self.imageWithPupil(pupil, E)
+        focus_layer1 = self.imageWithPupil(pupil, self.fresnelPropagate(E, -dz))
+        return focus_layer1, focus_layer2
+
+    def _plotZoomGrid(self, columns, zooms, save_path, half_um=70):
+        """Grille : ligne 1 = champ complet, lignes suivantes = zooms (centre, titre)."""
+        fov_um = self.L * 1e6
+        extent = [-fov_um / 2, fov_um / 2, -fov_um / 2, fov_um / 2]
+        vmax = max(np.percentile(img, 99.9) for img, _ in columns)
+
+        fig, axes = plt.subplots(1 + len(zooms), len(columns),
+                                 figsize=(7.5 * len(columns), 5.8 * (1 + len(zooms))),
+                                 constrained_layout=True, squeeze=False)
+        for col, (img, title) in enumerate(columns):
+            for row in range(1 + len(zooms)):
+                ax = axes[row, col]
+                im = ax.imshow(img, cmap="gray", extent=extent, origin="lower",
+                               vmin=0, vmax=vmax)
+                ax.set_xlabel(r"$x\ (\mu\mathrm{m})$")
+                ax.set_ylabel(r"$y\ (\mu\mathrm{m})$")
+                if row == 0:
+                    ax.set_title(title)
+                else:
+                    (xc, yc), ztitle = zooms[row - 1]
+                    ax.set_xlim(xc * 1e6 - half_um, xc * 1e6 + half_um)
+                    ax.set_ylim(yc * 1e6 - half_um, yc * 1e6 + half_um)
+                    ax.set_title(ztitle)
+                fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04).set_label("Intensity")
+        if save_path:
+            plt.savefig(save_path, dpi=150)
+        plt.show()
+
+    def defocusComparison(self, dz=20e-6, NA=0.5, save_path="figures/part5_defocus.png"):
+        """Q7 - Objet au point vs défocalisé de dz (brightfield)."""
+        pupil = self.computePupil(NA, self.lambda_ref, self.L, self.N)
+        field = self.get_complex_field()
+        in_focus = self.imageWithPupil(pupil, field)
+        defocused = self.imageWithPupil(pupil, self.fresnelPropagate(field, dz))
+        dof_um = self.lambda_ref / NA**2 * 1e6
+        print(f"=== DEFOCUS: dz = {dz*1e6:.0f} µm, NA = {NA}, "
+              f"depth of field ~ lambda/NA^2 = {dof_um:.1f} µm ===")
+        self._plotZoomGrid(
+            [(in_focus, f"In focus (NA = {NA})"),
+             (defocused, f"Defocused by dz = {dz*1e6:.0f} µm (DOF ≈ {dof_um:.1f} µm)")],
+            [(self.nucleusCentre(), "Zoom on a cell")],
+            save_path)
+
+    def twoLayerComparison(self, dz=20e-6, NA=0.5, save_path="figures/part5_two_layers.png"):
+        """Q8 - Objet à deux couches : mise au point sur la couche 1 puis sur la couche 2."""
+        focus1, focus2 = self.simulate_two_layer(dz, NA)
+        _, intensity2 = self.getLayer2()
+        self._plotZoomGrid(
+            [(focus1, f"Focus on layer 1 (z = 0), NA = {NA}"),
+             (focus2, f"Focus on layer 2 (z = {dz*1e6:.0f} µm), NA = {NA}")],
+            [(self.nucleusCentre(), "Zoom on a layer-1 cell"),
+             (self.nucleusCentre(intensity_map=intensity2), "Zoom on a layer-2 cell")],
+            save_path)
+
 
     # ================= PART 6 =================
     def assembleMicroscope(self, NA, dz=0.0, pixel_pitch=3.45e-6,
@@ -708,48 +768,17 @@ if __name__ == "__main__":
     sample.compareNAs()
     sample.resolution()
 
+    # ================= PART 3 : Contrast mechanisms (Q4, Q5) =================
     sample.contrastModes(NA=0.5)
 
-    # ================= PARTIE 4 : Échantillonnage et Bruit (Q6) =================
+    # ================= PART 4 : Detector sampling and noise (Q6) =================
     sample.cameraComparison(NA=0.5)
 
-    # ================= PARTIE 5 : Défocalisation et Profondeur de Champ (Q7) =================
-    dz = 20e-6  # Défocalisation de 20 µm
-    field_in = sample.get_complex_field()
-    
-    # Propagation de Fresnel en amont du système d'imagerie
-    field_defocused = sample.fresnelPropagate(field_in, dz=dz)
-    
-    # Imagerie du champ défocalisé avec une NA de 0.5
-    pupil = sample.computePupil(NA=0.5, lambda_ref=sample.lambda_ref, L=sample.L, N=sample.N)
-    image_defocused = sample.imageWithPupil(pupil, field=field_defocused)
+    # ================= PART 5 : Defocus and two-layer object (Q7, Q8) =================
+    sample.defocusComparison(dz=20e-6, NA=0.5)
+    sample.twoLayerComparison(dz=20e-6, NA=0.5)
 
-    image_two_layers = sample.simulate_two_layer(dz=dz, NA=0.5)
-    print("Image générée avec succès, dimensions :", image_two_layers.shape)
-
-    # Affichage de l'image défocalisée
-    plt.figure(figsize=(6, 5), constrained_layout=True)
-    plt.imshow(image_defocused, cmap="gray", extent=extent, origin="lower")
-    plt.title(f"Image défocalisée (dz = {dz*1e6:.0f} µm, NA = 0.5)")
-    plt.xlabel(r"$x\ (\mu\mathrm{m})$")
-    plt.ylabel(r"$y\ (\mu\mathrm{m})$")
-    plt.colorbar(label="Intensité")
-    plt.savefig("figures/part5_defocus.png", dpi=150)
-    plt.show()   
-
-    # Affichage de l'objet à deux couches
-    # affichage
-    plt.figure(figsize=(6, 5), constrained_layout=True)
-    plt.imshow(image_two_layers, cmap="gray", extent=extent, origin="lower")
-    plt.title(f"Objet à deux couches séparées de {dz*1e6:.0f} µm (NA = 0.5)")
-    plt.xlabel(r"$x\ (\mu\mathrm{m})$")
-    plt.ylabel(r"$y\ (\mu\mathrm{m})$")
-    plt.colorbar(label="Intensité")
-    plt.savefig("figures/part5_two_layers.png", dpi=150)
-    plt.show()
-
-
-        # ================= PARTIE 6 : Microscope complet (Q9, Q10, Q11) =================
+    # ================= PARTIE 6 : Microscope complet (Q9, Q10, Q11) =================
     # Grille plus fine pour que la pupille de NA 0.25 tienne dans la grille de calcul
     hr = Microscopy(n_cells=5, L=0.4e-3, N=2048, NA=0.25)
 
